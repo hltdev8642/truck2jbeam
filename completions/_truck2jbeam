@@ -1,0 +1,80 @@
+#compdef truck2jbeam.py truck2jbeam
+
+# ZSH completion for truck2jbeam.py
+# Enhanced Rigs of Rods to BeamNG.drive JBeam Converter
+#
+# Installation:
+#   1. Copy this file to a directory in your $fpath (e.g., ~/.zsh/completions/)
+#   2. Add the directory to your fpath in ~/.zshrc: fpath=(~/.zsh/completions $fpath)
+#   3. Reload completions: autoload -U compinit && compinit
+#
+# Or for system-wide installation:
+#   sudo cp _truck2jbeam /usr/share/zsh/site-functions/
+
+_truck2jbeam() {
+    local context state state_descr line
+    typeset -A opt_args
+
+    # Define RoR file extensions
+    local ror_extensions="*.truck *.trailer *.airplane *.boat *.car *.load"
+    
+    # Define template options
+    local templates=(
+        'car:Standard passenger car'
+        'truck:Heavy truck/lorry'
+        'airplane:Aircraft'
+        'trailer:Trailer/semi-trailer'
+    )
+    
+    # Define category options for RoR repository
+    local categories=(
+        'vehicles:Vehicles'
+        'terrains:Terrains'
+        'aircraft:Aircraft'
+        'boats:Boats'
+        'trailers:Trailers'
+        'loads:Loads'
+        'skins:Skins'
+        'tools:Tools'
+    )
+
+    _arguments -C \
+        '(--help -h)'{--help,-h}'[Show help message and exit]' \
+        '(--version)--version[Show version and exit]' \
+        '(--output-dir -o)'{--output-dir,-o}'[Output directory for JBeam files]:output directory:_directories' \
+        '(--directory -d)'{--directory,-d}'[Directory to search for rig files]:search directory:_directories' \
+        '(--batch)--batch[Batch process all files in directory]' \
+        '(--backup)--backup[Create backup of existing files (default)]' \
+        '(--no-backup)--no-backup[Don'\''t create backups]' \
+        '(--force -f)'{--force,-f}'[Force overwrite existing files]' \
+        '(--verbose -v)'{--verbose,-v}'[Verbose output]' \
+        '(--dry-run)--dry-run[Show what would be done without converting]' \
+        '(--author)--author[Set custom author name in output]:author name:' \
+        '(--template)--template[Apply conversion template]:template:_describe "templates" templates' \
+        '(--config)--config[Path to custom configuration file]:config file:_files -g "*.json"' \
+        '(--process-dae)--process-dae[Process DAE files directory]:DAE directory:_directories' \
+        '(--dae-output)--dae-output[Output directory for modified DAE files]:DAE output directory:_directories' \
+        '(--no-duplicate-resolution)--no-duplicate-resolution[Disable automatic duplicate mesh name resolution]' \
+        '(--strict-validation)--strict-validation[Enable strict validation mode]' \
+        '(--include-stats)--include-stats[Include conversion statistics in JBeam output]' \
+        '(--min-mass)--min-mass[Override minimum node mass]:mass (kg):' \
+        '(--search-ror)--search-ror[Search RoR repository for resources]:search query:' \
+        '(--download-ids)--download-ids[Download specific resources by ID]:resource IDs:' \
+        '(--download-search)--download-search[Search and download resources]:search query:' \
+        '(--download-dir)--download-dir[Directory for downloads]:download directory:_directories' \
+        '(--category)--category[Filter by category]:category:_describe "categories" categories' \
+        '(--auto-convert)--auto-convert[Automatically convert downloaded rig files]' \
+        '(--no-extract)--no-extract[Don'\''t extract downloaded zip files]' \
+        '(--search-limit)--search-limit[Limit search results]:limit:' \
+        '*:RoR files:_files -g "'"$ror_extensions"'"'
+}
+
+# Helper function to complete RoR files in current directory
+_truck2jbeam_files() {
+    local expl
+    _description files expl 'RoR files'
+    _files "$expl[@]" -g '*.truck *.trailer *.airplane *.boat *.car *.load'
+}
+
+# Register the completion function
+_truck2jbeam "$@"
