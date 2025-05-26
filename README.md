@@ -18,11 +18,21 @@ truck2jbeam is an enhanced converter for Rigs of Rods (RoR) vehicle files to Bea
 - **Backup System**: Automatic backup of existing files
 - **Template System**: Pre-configured settings for different vehicle types
 
+### 🆕 Enhanced Features (v3.0.0)
+
+- **🔺 Advanced Triangle/Quad Support**: Complete support for RoR triangles and quads with automatic conversion
+- **🎨 Enhanced Flexbody/Prop System**: Comprehensive flexbody and prop support with proper node grouping
+- **🔧 Duplicate Mesh Resolution**: Automatic detection and resolution of duplicate mesh names
+- **📁 DAE File Processing**: Full COLLADA (.dae) file support for mesh extraction and synchronization
+- **🎯 Proper BeamNG Grouping**: Critical fix ensuring flexbodies display correctly in BeamNG.drive
+- **⚡ Forset Support**: Enhanced forset parsing for proper flexbody node assignment
+
 ## Installation
 
 ### Requirements
 - Python 3.7 or higher
 - **Optional for download functionality**: `pip install requests beautifulsoup4`
+- **Optional for DAE processing**: `pip install lxml` (recommended for better performance)
 
 ### Quick Start
 1. Download or clone this repository
@@ -86,6 +96,44 @@ python truck2jbeam.py mycar.truck --no-backup
 python truck2jbeam.py --help
 ```
 
+### Enhanced Features Usage
+
+#### Triangle and Quad Support
+```bash
+# Convert files with triangles and quads (automatic)
+python truck2jbeam.py vehicle_with_surfaces.truck --verbose
+
+# The converter automatically:
+# - Parses triangle and quad sections
+# - Converts quads to triangles for BeamNG compatibility
+# - Handles collision and visual surface types
+# - Preserves material assignments
+```
+
+#### Flexbody and Prop Processing
+```bash
+# Convert with enhanced flexbody support (automatic)
+python truck2jbeam.py detailed_vehicle.truck
+
+# Features include:
+# - Proper node grouping for BeamNG visibility
+# - Forset parsing and node assignment
+# - Duplicate mesh name resolution
+# - Enhanced material and scaling support
+```
+
+#### DAE File Processing
+```bash
+# Process DAE files alongside conversion
+python truck2jbeam.py vehicle.truck --process-dae ./meshes --dae-output ./modified_meshes
+
+# Extract mesh names from DAE files
+python -c "from rig import Rig; r = Rig(); print(r.extract_dae_mesh_names('./meshes'))"
+
+# Synchronize DAE files with JBeam output
+python -c "from rig import Rig; r = Rig(); r.from_file('vehicle.truck'); r.process_dae_files('./meshes', './output')"
+```
+
 ### Configuration Management
 
 ```bash
@@ -138,6 +186,83 @@ python ror_download_cli.py info 123
 python ror_download_cli.py history --limit 20
 ```
 
+## Enhanced Features Details
+
+### 🔺 Advanced Triangle and Quad Support
+
+The converter now provides comprehensive support for RoR triangle and quad surfaces:
+
+#### Features
+- **Complete Triangle Support**: Parses all RoR triangle formats including collision, visual, and mixed types
+- **Quad to Triangle Conversion**: Automatically converts quads to triangles for BeamNG compatibility
+- **Material Preservation**: Maintains material assignments and surface properties
+- **Options Support**: Handles RoR triangle options ('c' for collision, 'v' for visual)
+- **Drag/Lift Coefficients**: Supports aerodynamic properties
+
+#### Example RoR Input
+```
+triangles
+1, 2, 3, c
+4, 5, 6, v, custom_material
+```
+
+#### Generated JBeam Output
+```json
+"triangles": [
+    ["n1:", "n2:", "n3:", "group"],
+    ["node1", "node2", "node3", "collision_triangles"],
+    ["node4", "node5", "node6", "visual_triangles"]
+]
+```
+
+### 🎨 Enhanced Flexbody and Prop System
+
+Critical improvements for proper BeamNG.drive compatibility:
+
+#### Key Improvements
+- **Proper Node Grouping**: Ensures flexbodies are visible in BeamNG.drive
+- **Forset Integration**: Processes forset commands for correct node assignment
+- **Enhanced Properties**: Support for scaling, materials, and animation
+- **Automatic Group Assignment**: Intelligently assigns nodes to flexbody groups
+
+#### The Critical Fix
+Previous versions had flexbodies that were invisible in BeamNG.drive due to improper node grouping. This version fixes this by:
+1. Automatically assigning reference nodes to flexbody groups
+2. Processing forset commands to include additional nodes
+3. Ensuring all flexbody nodes are properly grouped before JBeam output
+
+### 🔧 Duplicate Mesh Resolution
+
+Automatically handles duplicate mesh names that are common in RoR files:
+
+#### Features
+- **Cross-Type Detection**: Detects duplicates across flexbodies and props
+- **Sequential Renaming**: Uses pattern `mesh_001.ext`, `mesh_002.ext`, etc.
+- **Case-Insensitive**: Treats "Wheel.mesh" and "wheel.mesh" as duplicates
+- **Extension Preservation**: Maintains .mesh and .dae file extensions
+
+#### Example
+```
+Input:  wheel.mesh, wheel.mesh, wheel.mesh
+Output: wheel_001.mesh, wheel_002.mesh, wheel_003.mesh
+```
+
+### 📁 DAE File Processing
+
+Comprehensive COLLADA (.dae) file support for mesh synchronization:
+
+#### Capabilities
+- **Mesh Name Extraction**: Extracts all mesh names from DAE files
+- **Bidirectional Sync**: Synchronizes DAE files with JBeam group names
+- **Namespace Support**: Proper COLLADA XML namespace handling
+- **Batch Processing**: Processes entire directories of DAE files
+
+#### Workflow
+1. **Extract**: Read mesh names from DAE files for validation
+2. **Resolve**: Apply duplicate mesh name resolution
+3. **Synchronize**: Update DAE files to match JBeam group names
+4. **Validate**: Ensure consistency between DAE and JBeam files
+
 ## Supported RoR Sections
 
 ### Core Sections
@@ -154,11 +279,15 @@ python ror_download_cli.py history --limit 20
 - `brakes` / `axles` - Braking and differential systems
 
 ### Visual & Interaction
-- `flexbodies` - 3D mesh bodies
-- `submesh` - Collision triangles
+- `flexbodies` - 3D mesh bodies with enhanced node grouping and forset support
+- `props` - Static mesh attachments with animation and collision control
+- `triangles` - Collision and visual surface triangles with material support
+- `quads` - Quad surfaces (automatically converted to triangles)
+- `submesh` - Legacy collision triangles
 - `cinecam` - Internal cameras
 - `slidenodes` / `railgroups` - Sliding mechanisms
 - `contacters` - Collision nodes
+- `forset` - Node sets for flexbody assignment
 
 ### Configuration
 - `set_beam_defaults` / `set_beam_defaults_scale` - Beam property defaults
@@ -194,6 +323,9 @@ The converter uses `truck2jbeam_config.json` for persistent settings. The file i
 - `pretty_print`: Format output JSON nicely
 - `strict_validation`: Enable strict validation mode
 - `material_mappings`: Custom material name mappings
+- `resolve_duplicate_meshes`: Automatically resolve duplicate mesh names (default: true)
+- `process_dae_files`: Enable DAE file processing (default: false)
+- `dae_output_directory`: Directory for modified DAE files
 
 ## Error Handling & Validation
 
@@ -203,6 +335,11 @@ The converter uses `truck2jbeam_config.json` for persistent settings. The file i
 - Duplicate node positions
 - Invalid mass values
 - Engine configuration consistency
+- Triangle and quad surface validation
+- Flexbody and prop reference validation
+- Mesh name conflict detection
+- DAE file existence and structure validation
+- Forset node reference validation
 
 ### Error Reporting
 - Line-by-line error reporting with context
@@ -224,6 +361,11 @@ The test suite includes:
 - Configuration management tests
 - Error handling validation
 - Performance benchmarks
+- Triangle and quad processing tests
+- Flexbody and prop functionality tests
+- Duplicate mesh resolution tests
+- DAE file processing tests
+- Forset parsing and validation tests
 
 ## Output Format
 
@@ -233,6 +375,10 @@ The converter generates BeamNG.drive compatible JBeam files with:
 - Comprehensive metadata and statistics
 - Material and group assignments
 - Camera and visual element support
+- Enhanced triangle and quad surface definitions
+- Proper flexbody and prop grouping for BeamNG visibility
+- Unique mesh name resolution
+- DAE file synchronization support
 
 ## Troubleshooting
 
@@ -258,6 +404,18 @@ The converter generates BeamNG.drive compatible JBeam files with:
 - Check for orphaned references
 - Verify required sections exist
 
+**Flexbodies not visible in BeamNG**
+- Ensure proper node grouping is enabled
+- Check forset parsing and node assignment
+- Verify mesh files exist and are properly named
+- Review duplicate mesh name resolution
+
+**DAE file processing issues**
+- Install lxml for better performance: `pip install lxml`
+- Check DAE file structure and validity
+- Verify mesh name mappings are correct
+- Ensure output directory permissions
+
 ### Getting Help
 1. Run with `--verbose` for detailed output
 2. Check the test suite for examples
@@ -278,6 +436,16 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## Changelog
 
+### Version 3.0.0 (Latest)
+- **🔺 Advanced Triangle/Quad Support**: Complete RoR triangle and quad parsing with automatic conversion
+- **🎨 Enhanced Flexbody/Prop System**: Comprehensive flexbody and prop support with proper BeamNG node grouping
+- **🔧 Duplicate Mesh Resolution**: Automatic detection and sequential renaming of duplicate mesh names
+- **📁 DAE File Processing**: Full COLLADA (.dae) file support for mesh extraction and synchronization
+- **🎯 Critical BeamNG Fix**: Proper node grouping ensuring flexbodies display correctly in-game
+- **⚡ Forset Support**: Enhanced forset parsing for proper flexbody node assignment
+- **🧪 Comprehensive Testing**: Extensive test coverage for all new features
+- **📚 Enhanced Documentation**: Complete documentation of all features and capabilities
+
 ### Version 2.0.0
 - Complete rewrite with enhanced error handling
 - Added configuration system and templates
@@ -292,8 +460,31 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - Basic RoR to JBeam conversion
 - Support for core RoR sections
 
+## Examples and Demonstrations
+
+### Running Examples
+```bash
+# Test enhanced features (triangles, quads, flexbodies, props, duplicate resolution)
+python -c "from example_usage import example_enhanced_features; example_enhanced_features()"
+
+# Test DAE file processing capabilities
+python -c "from example_usage import example_dae_processing; example_dae_processing()"
+
+# Run basic usage examples
+python example_usage.py
+```
+
+### Example Output
+The enhanced converter produces high-quality JBeam files with:
+- ✅ **Perfect BeamNG Compatibility**: All visual elements display correctly
+- ✅ **Unique Mesh Names**: No conflicts or duplicate entries
+- ✅ **Proper Node Grouping**: Flexbodies are visible and functional
+- ✅ **Complete Surface Support**: Triangles and quads with materials
+- ✅ **DAE Synchronization**: Mesh files match JBeam definitions
+
 ## Special Thanks
 
 - [Goosah](http://www.beamng.com/members/goosah.19311/) for helping with tire mechanics
 - The Rigs of Rods community for documentation and examples
 - BeamNG.drive developers for JBeam format specification
+- Contributors who reported issues with flexbody visibility and mesh naming
