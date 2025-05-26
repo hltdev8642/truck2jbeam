@@ -12,13 +12,13 @@
 # Register argument completer for truck2jbeam.py
 Register-ArgumentCompleter -CommandName 'truck2jbeam.py', 'python' -ParameterName 'truck2jbeam.py' -ScriptBlock {
     param($commandName, $parameterName, $wordToComplete, $commandAst, $fakeBoundParameters)
-    
+
     # Check if we're completing truck2jbeam.py
     $commandLine = $commandAst.ToString()
     if ($commandLine -notmatch 'truck2jbeam\.py') {
         return
     }
-    
+
     # Define completion options
     $options = @{
         # Basic options
@@ -40,7 +40,7 @@ Register-ArgumentCompleter -CommandName 'truck2jbeam.py', 'python' -ParameterNam
         '--author' = 'Set custom author name in output'
         '--template' = 'Apply conversion template'
         '--config' = 'Path to custom configuration file'
-        
+
         # Enhanced features
         '--process-dae' = 'Process DAE files directory'
         '--dae-output' = 'Output directory for modified DAE files'
@@ -48,7 +48,8 @@ Register-ArgumentCompleter -CommandName 'truck2jbeam.py', 'python' -ParameterNam
         '--strict-validation' = 'Enable strict validation mode'
         '--include-stats' = 'Include conversion statistics in JBeam output'
         '--min-mass' = 'Override minimum node mass'
-        
+        '--no-transform-properties' = 'Exclude rotation, translation, and scale properties from flexbodies and props'
+
         # Download options
         '--search-ror' = 'Search RoR repository for resources'
         '--download-ids' = 'Download specific resources by ID'
@@ -59,19 +60,19 @@ Register-ArgumentCompleter -CommandName 'truck2jbeam.py', 'python' -ParameterNam
         '--no-extract' = "Don't extract downloaded zip files"
         '--search-limit' = 'Limit search results'
     }
-    
+
     # Template options
     $templates = @('car', 'truck', 'airplane', 'trailer')
-    
+
     # Category options
     $categories = @('vehicles', 'terrains', 'aircraft', 'boats', 'trailers', 'loads', 'skins', 'tools')
-    
+
     # RoR file extensions
     $rorExtensions = @('*.truck', '*.trailer', '*.airplane', '*.boat', '*.car', '*.load')
-    
+
     # Get the current word being completed
     $currentWord = $wordToComplete
-    
+
     # If completing an option
     if ($currentWord.StartsWith('-')) {
         $options.Keys | Where-Object { $_ -like "$currentWord*" } | ForEach-Object {
@@ -84,7 +85,7 @@ Register-ArgumentCompleter -CommandName 'truck2jbeam.py', 'python' -ParameterNam
         }
         return
     }
-    
+
     # Check what the previous parameter was for context-specific completion
     $tokens = $commandAst.CommandElements
     $previousToken = $null
@@ -94,7 +95,7 @@ Register-ArgumentCompleter -CommandName 'truck2jbeam.py', 'python' -ParameterNam
             break
         }
     }
-    
+
     # Context-specific completions
     switch ($previousToken) {
         '--template' {
@@ -108,7 +109,7 @@ Register-ArgumentCompleter -CommandName 'truck2jbeam.py', 'python' -ParameterNam
             }
             return
         }
-        
+
         '--category' {
             $categories | Where-Object { $_ -like "$currentWord*" } | ForEach-Object {
                 [System.Management.Automation.CompletionResult]::new(
@@ -120,7 +121,7 @@ Register-ArgumentCompleter -CommandName 'truck2jbeam.py', 'python' -ParameterNam
             }
             return
         }
-        
+
         { $_ -in @('--output-dir', '-o', '--directory', '-d', '--process-dae', '--dae-output', '--download-dir') } {
             # Complete directories
             Get-ChildItem -Directory -Path "." -Name | Where-Object { $_ -like "$currentWord*" } | ForEach-Object {
@@ -133,7 +134,7 @@ Register-ArgumentCompleter -CommandName 'truck2jbeam.py', 'python' -ParameterNam
             }
             return
         }
-        
+
         '--config' {
             # Complete JSON files
             Get-ChildItem -File -Path "." -Name -Include "*.json" | Where-Object { $_ -like "$currentWord*" } | ForEach-Object {
@@ -147,7 +148,7 @@ Register-ArgumentCompleter -CommandName 'truck2jbeam.py', 'python' -ParameterNam
             return
         }
     }
-    
+
     # Default: complete RoR files
     foreach ($extension in $rorExtensions) {
         Get-ChildItem -File -Path "." -Name -Include $extension | Where-Object { $_ -like "$currentWord*" } | ForEach-Object {
@@ -164,7 +165,7 @@ Register-ArgumentCompleter -CommandName 'truck2jbeam.py', 'python' -ParameterNam
 # Also register for direct python calls
 Register-ArgumentCompleter -CommandName 'python', 'python3', 'py' -ScriptBlock {
     param($commandName, $parameterName, $wordToComplete, $commandAst, $fakeBoundParameters)
-    
+
     # Check if we're completing truck2jbeam.py as the first argument to python
     $commandLine = $commandAst.ToString()
     if ($commandLine -match 'python.*truck2jbeam\.py') {

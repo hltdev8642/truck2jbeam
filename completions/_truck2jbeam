@@ -17,7 +17,7 @@ _truck2jbeam() {
 
     # Define RoR file extensions
     local ror_extensions="*.truck *.trailer *.airplane *.boat *.car *.load"
-    
+
     # Define template options
     local templates=(
         'car:Standard passenger car'
@@ -25,7 +25,7 @@ _truck2jbeam() {
         'airplane:Aircraft'
         'trailer:Trailer/semi-trailer'
     )
-    
+
     # Define category options for RoR repository
     local categories=(
         'vehicles:Vehicles'
@@ -58,6 +58,7 @@ _truck2jbeam() {
         '(--strict-validation)--strict-validation[Enable strict validation mode]' \
         '(--include-stats)--include-stats[Include conversion statistics in JBeam output]' \
         '(--min-mass)--min-mass[Override minimum node mass]:mass (kg):' \
+        '(--no-transform-properties)--no-transform-properties[Exclude rotation, translation, and scale properties from flexbodies and props]' \
         '(--search-ror)--search-ror[Search RoR repository for resources]:search query:' \
         '(--download-ids)--download-ids[Download specific resources by ID]:resource IDs:' \
         '(--download-search)--download-search[Search and download resources]:search query:' \

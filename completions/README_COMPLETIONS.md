@@ -93,6 +93,7 @@ truck2jbeam.py --category <TAB>
 - `--strict-validation` - Strict validation mode
 - `--include-stats` - Include statistics
 - `--min-mass` - Minimum mass override
+- `--no-transform-properties` - Exclude rotation, translation, and scale properties
 
 ### Download Options
 - `--search-ror` - Search RoR repository

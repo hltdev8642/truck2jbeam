@@ -996,9 +996,7 @@ nodes
 
 flexbodies
 1, 2, 3, 0.0, 0.0, 0.5, 0, 0, 0, car_body.mesh, 1.0, 1.0, 1.0
-
-forset
-3-4
+forset 3-4
 
 end
 """

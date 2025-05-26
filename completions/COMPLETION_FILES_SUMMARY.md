@@ -47,7 +47,7 @@ Add-Content -Path $PROFILE -Value ". path\to\completions\truck2jbeam-completion.
 ## ✨ Features
 
 ### Intelligent Auto-Completion
-- **Command Options**: All 30+ command-line flags and parameters
+- **Command Options**: All 31 command-line flags and parameters
 - **File Types**: RoR files (*.truck, *.trailer, *.airplane, *.boat, *.car, *.load)
 - **Templates**: car, truck, airplane, trailer
 - **Categories**: vehicles, terrains, aircraft, boats, trailers, loads, skins, tools
@@ -87,7 +87,7 @@ truck2jbeam.py --output-dir <TAB>
 - `--dry-run` - Preview mode
 - `--author` - Custom author name
 
-### Enhanced Features (8)
+### Enhanced Features (9)
 - `--template` - Apply conversion template
 - `--config` - Custom configuration file
 - `--process-dae` - DAE file processing
@@ -96,6 +96,7 @@ truck2jbeam.py --output-dir <TAB>
 - `--strict-validation` - Strict validation mode
 - `--include-stats` - Include conversion statistics
 - `--min-mass` - Override minimum node mass
+- `--no-transform-properties` - Exclude rotation, translation, and scale properties
 
 ### Download Options (11)
 - `--search-ror` - Search RoR repository
@@ -107,7 +108,7 @@ truck2jbeam.py --output-dir <TAB>
 - `--no-extract` - Don't extract archives
 - `--search-limit` - Search result limit
 
-**Total: 30 command-line options with intelligent completion**
+**Total: 31 command-line options with intelligent completion**
 
 ## 🔧 Technical Implementation
 
@@ -161,7 +162,7 @@ truck2jbeam.py --<TAB>
 ### Before Completion
 ```bash
 truck2jbeam.py --<cursor>
-# User must remember all 30+ options
+# User must remember all 31 options
 ```
 
 ### After Completion
@@ -190,7 +191,7 @@ truck2jbeam.py --<TAB>
 ## 📈 Benefits
 
 ### For Users
-- **Faster Command Entry**: No need to remember 30+ options
+- **Faster Command Entry**: No need to remember 31 options
 - **Reduced Errors**: Prevents typos in option names
 - **Discovery**: Easy to find available features
 - **Efficiency**: Context-aware file and directory completion

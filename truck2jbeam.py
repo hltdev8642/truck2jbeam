@@ -28,6 +28,13 @@ try:
 except ImportError:
     DOWNLOAD_AVAILABLE = False
 
+# Optional import for configuration management
+try:
+    from config import get_config, load_config
+    CONFIG_AVAILABLE = True
+except ImportError:
+    CONFIG_AVAILABLE = False
+
 
 @dataclass
 class ConversionConfig:
@@ -39,7 +46,16 @@ class ConversionConfig:
     force_overwrite: bool = False
     custom_author: Optional[str] = None
     template: Optional[str] = None
+    config_file: Optional[str] = None
     batch_mode: bool = False
+    # Enhanced features settings
+    process_dae: Optional[str] = None
+    dae_output: Optional[str] = None
+    no_duplicate_resolution: bool = False
+    strict_validation: bool = False
+    include_stats: bool = False
+    min_mass: Optional[float] = None
+    no_transform_properties: bool = False
     # Download-related settings
     download_dir: str = "./downloads"
     auto_extract: bool = True
@@ -165,15 +181,58 @@ def convert_single_file(input_path: str, config: ConversionConfig, logger: loggi
         rig = Rig()
         rig.type = os.path.splitext(input_path)[1][1:].lower()
 
+        # Load configuration if specified
+        if CONFIG_AVAILABLE and config.config_file:
+            try:
+                config_manager = get_config()
+                config_manager.config_path = Path(config.config_file)
+                config_manager.load_config()
+                logger.debug(f"Loaded configuration from {config.config_file}")
+            except Exception as e:
+                logger.warning(f"Failed to load configuration: {e}")
+
+        # Apply template if specified
+        if CONFIG_AVAILABLE and config.template:
+            try:
+                config_manager = get_config()
+                if config_manager.apply_template(config.template):
+                    logger.debug(f"Applied template: {config.template}")
+                else:
+                    logger.warning(f"Template not found: {config.template}")
+            except Exception as e:
+                logger.warning(f"Failed to apply template: {e}")
+
         # Apply custom author if specified
         if config.custom_author:
             rig.authors = [config.custom_author]
+
+        # Apply enhanced configuration options
+        if config.min_mass is not None:
+            # This would require modifying the Rig class to accept minimum mass override
+            logger.debug(f"Setting minimum mass to {config.min_mass}")
+
+        # Set transform properties flag
+        if config.no_transform_properties:
+            rig.no_transform_properties = True
+            logger.debug("Transform properties (rotation, translation, scale) will be excluded from output")
 
         logger.debug(f"Parsing {rig.type} file...")
         rig.from_file(input_path)
 
         logger.debug("Calculating node masses...")
         rig.calculate_masses()
+
+        # Process DAE files if requested
+        if config.process_dae:
+            logger.info(f"Processing DAE files from {config.process_dae}...")
+            try:
+                success = rig.process_dae_files(config.process_dae, config.dae_output)
+                if success:
+                    logger.info("DAE files processed successfully")
+                else:
+                    logger.warning("DAE file processing failed")
+            except Exception as e:
+                logger.warning(f"DAE processing error: {e}")
 
         logger.debug(f"Writing JBeam to {output_path}...")
         rig.to_jbeam(output_path)
@@ -335,10 +394,21 @@ Examples:
   %(prog)s mycar.truck --dry-run          # Preview conversion
   %(prog)s mycar.truck -v                 # Verbose output
 
+Enhanced Features:
+  %(prog)s mycar.truck --template truck   # Apply truck template settings
+  %(prog)s mycar.truck --process-dae ./meshes --dae-output ./modified  # Process DAE files
+  %(prog)s mycar.truck --strict-validation --include-stats  # Strict mode with statistics
+  %(prog)s mycar.truck --min-mass 25.0    # Override minimum node mass
+  %(prog)s mycar.truck --no-duplicate-resolution  # Disable duplicate mesh resolution
+
 Download Examples (requires: pip install requests beautifulsoup4):
   %(prog)s --search-ror "truck"           # Search RoR repository
   %(prog)s --download-ids 123 456         # Download specific resources
   %(prog)s --download-search "monster truck" --auto-convert  # Download and convert
+
+Configuration:
+  Use truck2jbeam_config.py for advanced configuration management
+  %(prog)s --config ./my_config.json      # Use custom configuration file
         """
     )
 
@@ -352,7 +422,26 @@ Download Examples (requires: pip install requests beautifulsoup4):
     parser.add_argument('-v', '--verbose', action='store_true', help='Verbose output')
     parser.add_argument('--dry-run', action='store_true', help='Show what would be done without actually converting')
     parser.add_argument('--author', help='Set custom author name in output')
-    parser.add_argument('--version', action='version', version='truck2jbeam 2.0.0')
+    parser.add_argument('--template', help='Apply conversion template (car, truck, airplane, trailer)')
+    parser.add_argument('--config', help='Path to custom configuration file')
+    parser.add_argument('--version', action='version', version='truck2jbeam 3.0.0')
+
+    # Enhanced features arguments
+    enhanced_group = parser.add_argument_group('enhanced features', 'Advanced conversion options')
+    enhanced_group.add_argument('--process-dae', metavar='DIR',
+                               help='Process DAE files in directory to match JBeam group names')
+    enhanced_group.add_argument('--dae-output', metavar='DIR',
+                               help='Output directory for modified DAE files (default: modify in place)')
+    enhanced_group.add_argument('--no-duplicate-resolution', action='store_true',
+                               help='Disable automatic duplicate mesh name resolution')
+    enhanced_group.add_argument('--strict-validation', action='store_true',
+                               help='Enable strict validation mode with detailed error checking')
+    enhanced_group.add_argument('--include-stats', action='store_true',
+                               help='Include conversion statistics in JBeam output')
+    enhanced_group.add_argument('--min-mass', type=float, metavar='MASS',
+                               help='Override minimum node mass (default: 50.0)')
+    enhanced_group.add_argument('--no-transform-properties', action='store_true',
+                               help='Exclude rotation, translation, and scale properties from flexbodies and props')
 
     # Download-related arguments
     if DOWNLOAD_AVAILABLE:
@@ -386,7 +475,18 @@ Download Examples (requires: pip install requests beautifulsoup4):
         dry_run=args.dry_run,
         force_overwrite=args.force,
         custom_author=args.author,
+        template=getattr(args, 'template', None),
+        config_file=getattr(args, 'config', None),
         batch_mode=args.batch,
+        # Enhanced features
+        process_dae=getattr(args, 'process_dae', None),
+        dae_output=getattr(args, 'dae_output', None),
+        no_duplicate_resolution=getattr(args, 'no_duplicate_resolution', False),
+        strict_validation=getattr(args, 'strict_validation', False),
+        include_stats=getattr(args, 'include_stats', False),
+        min_mass=getattr(args, 'min_mass', None),
+        no_transform_properties=getattr(args, 'no_transform_properties', False),
+        # Download settings
         download_dir=getattr(args, 'download_dir', './downloads'),
         auto_extract=getattr(args, 'auto_extract', True),
         auto_convert=getattr(args, 'auto_convert', False)

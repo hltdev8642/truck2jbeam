@@ -71,6 +71,9 @@ class Rig:
         # DAE processor for mesh name handling
         self.dae_processor = DAEProcessor()
 
+        # Flag to exclude transform properties from JBeam output
+        self.no_transform_properties = False
+
     def add_warning(self, message: str, line_number: Optional[int] = None):
         """Add a parsing warning"""
         warning = f"Line {line_number}: {message}" if line_number else message
@@ -788,7 +791,10 @@ class Rig:
 
     def sync_dae_with_jbeam(self, dae_file_path: str, output_path: Optional[str] = None) -> bool:
         """
-        Synchronize a single DAE file with JBeam group names
+        Synchronize a single DAE file with JBeam mesh names
+
+        IMPORTANT: This modifies DAE mesh names to match the "mesh" property values in JBeam output,
+        NOT the group names. This ensures DAE files work correctly with the generated JBeam.
 
         Args:
             dae_file_path: Path to the DAE file to process
@@ -909,14 +915,25 @@ class Rig:
             self.logger.warning(f"Can't find nodes for flexbody {fb.mesh}. Possibly forset on tires?")
             continue
 
-          # Calculate position and rotation
-          real_x_offset = refnode.x + (xnode.x - refnode.x) * fb.offsetX
-          real_y_offset = refnode.y + (ynode.y - refnode.y) * fb.offsetY
-          real_z_offset = fb.offsetZ - refnode.z
+          # Calculate position with coordinate system conversion
+          # RoR coordinate system: X=right, Y=up, Z=forward
+          # BeamNG coordinate system: X=right, Y=forward, Z=up
+          # Apply coordinate system conversion to offset values
+          real_x_offset = fb.offsetX   # X-axis stays the same (right)
+          real_y_offset = fb.offsetZ   # RoR Z-offset (forward) becomes BeamNG Y-offset (forward)
+          real_z_offset = fb.offsetY   # RoR Y-offset (up) becomes BeamNG Z-offset (up)
 
-          real_x_rotation = fb.rotX
-          real_y_rotation = fb.rotY
-          real_z_rotation = fb.rotZ
+          # Convert RoR rotation to BeamNG rotation
+          # Both RoR and BeamNG use degrees for rotations
+          # RoR coordinate system: X=right, Y=up, Z=forward
+          # BeamNG coordinate system: X=right, Y=forward, Z=up
+          # Need to apply coordinate system conversion only
+
+          # Apply coordinate system conversion (keep in degrees)
+          # RoR rotations are applied in RoR's coordinate system, need to map to BeamNG's system
+          real_x_rotation = fb.rotX   # Roll around X-axis (same in both systems)
+          real_y_rotation = fb.rotZ   # Pitch: RoR Z-rotation becomes BeamNG Y-rotation
+          real_z_rotation = fb.rotY   # Yaw: RoR Y-rotation becomes BeamNG Z-rotation
 
           # Get group name
           group_name = fb.get_group_name() if hasattr(fb, 'get_group_name') else parser.ParseGroupName(fb.mesh)
@@ -938,25 +955,42 @@ class Rig:
           elif mesh_name.endswith('.dae'):
               mesh_name = mesh_name[:-4]
 
-          f.write(f"\t\t\t[\"{mesh_name}\", [\"{group_name}\"], {json.dumps(non_flex_materials)}, ")
-          f.write(f"{{\"pos\":{{\"x\":{real_x_offset}, \"y\":{real_y_offset}, \"z\":{real_z_offset}}}, ")
-          f.write(f"\"rot\":{{\"x\":{real_x_rotation}, \"y\":{real_y_rotation}, \"z\":{real_z_rotation}}}, ")
-          f.write(f"\"scale\":{{\"x\":{scale_x}, \"y\":{scale_y}, \"z\":{scale_z}}}")
+          f.write(f"\t\t\t[\"{mesh_name}\", [\"{group_name}\"], {json.dumps(non_flex_materials)}")
 
-          # Add enhanced properties
-          if hasattr(fb, 'disable_mesh_breaking') and fb.disable_mesh_breaking:
-            f.write(f", \"disableMeshBreaking\":true")
-          if hasattr(fb, 'plastic_deform_coef') and fb.plastic_deform_coef > 0:
-            f.write(f", \"plasticDeformCoef\":{fb.plastic_deform_coef}")
-          if hasattr(fb, 'damage_threshold') and fb.damage_threshold > 0:
-            f.write(f", \"damageThreshold\":{fb.damage_threshold}")
+          # Add transform properties only if not disabled
+          if not self.no_transform_properties:
+            f.write(f", {{\"pos\":{{\"x\":{real_x_offset}, \"y\":{real_y_offset}, \"z\":{real_z_offset}}}, ")
+            f.write(f"\"rot\":{{\"x\":{real_x_rotation}, \"y\":{real_y_rotation}, \"z\":{real_z_rotation}}}, ")
+            f.write(f"\"scale\":{{\"x\":{scale_x}, \"y\":{scale_y}, \"z\":{scale_z}}}")
 
-          f.write("}],\n")
+            # Add enhanced properties
+            if hasattr(fb, 'disable_mesh_breaking') and fb.disable_mesh_breaking:
+              f.write(f", \"disableMeshBreaking\":true")
+            if hasattr(fb, 'plastic_deform_coef') and fb.plastic_deform_coef > 0:
+              f.write(f", \"plasticDeformCoef\":{fb.plastic_deform_coef}")
+            if hasattr(fb, 'damage_threshold') and fb.damage_threshold > 0:
+              f.write(f", \"damageThreshold\":{fb.damage_threshold}")
+
+            f.write("}")
+          else:
+            # Add enhanced properties without transform properties
+            enhanced_props = []
+            if hasattr(fb, 'disable_mesh_breaking') and fb.disable_mesh_breaking:
+              enhanced_props.append(f"\"disableMeshBreaking\":true")
+            if hasattr(fb, 'plastic_deform_coef') and fb.plastic_deform_coef > 0:
+              enhanced_props.append(f"\"plasticDeformCoef\":{fb.plastic_deform_coef}")
+            if hasattr(fb, 'damage_threshold') and fb.damage_threshold > 0:
+              enhanced_props.append(f"\"damageThreshold\":{fb.damage_threshold}")
+
+            if enhanced_props:
+              f.write(f", {{{', '.join(enhanced_props)}}}")
+
+          f.write("],\n")
         f.write("\t\t],\n\n")
 
-      # write props (new section)
+      # write props (corrected BeamNG format)
       if len(self.props) > 0:
-        f.write("\t\t\"props\":[\n\t\t\t[\"mesh\", \"[group]:\", \"idRef:\", \"idX:\", \"idY:\", \"baseRotation\", \"rotation\", \"translation\", \"min\", \"max\", \"offset\", \"multiplier\"],\n")
+        f.write("\t\t\"props\":[\n\t\t\t[\"func\", \"mesh\", \"idRef:\", \"idX:\", \"idY:\", \"baseRotation\", \"rotation\", \"translation\", \"min\", \"max\", \"offset\", \"multiplier\"],\n")
         for prop in self.props:
           # Find reference nodes
           refnode = next((x for x in self.nodes if x.name == prop.refnode), None)
@@ -970,12 +1004,21 @@ class Rig:
           # Get group name
           group_name = prop.get_group_name() if hasattr(prop, 'get_group_name') else parser.ParseGroupName(prop.mesh)
 
-          # Calculate base rotation from offset and rotation
-          base_rotation = [prop.rotX, prop.rotY, prop.rotZ]
+          # Convert RoR rotation to BeamNG rotation for props
+          # Apply the same coordinate system conversion as flexbodies
+          # Both RoR and BeamNG use degrees for rotations
 
-          # Set up animation parameters
-          rotation = [0, 0, 0]
-          translation = [0, 0, 0]
+          # Apply coordinate system conversion (keep in degrees)
+          prop_x_rotation = prop.rotX   # Roll around X-axis (same in both systems)
+          prop_y_rotation = prop.rotZ   # Pitch: RoR Z-rotation becomes BeamNG Y-rotation
+          prop_z_rotation = prop.rotY   # Yaw: RoR Y-rotation becomes BeamNG Z-rotation
+
+          # Calculate base rotation from converted values (BeamNG uses dictionary format)
+          base_rotation = {"x": prop_x_rotation, "y": prop_y_rotation, "z": prop_z_rotation}
+
+          # Set up animation parameters (BeamNG uses dictionary format)
+          rotation = {"x": 0, "y": 0, "z": 0}
+          translation = {"x": 0, "y": 0, "z": 0}
           min_val = 0
           max_val = 0
           offset = 0
@@ -985,27 +1028,36 @@ class Rig:
             if hasattr(prop, 'animation_mode'):
               if prop.animation_mode == "rotation":
                 if hasattr(prop, 'animation_axis'):
-                  rotation = prop.animation_axis
+                  rotation = {"x": prop.animation_axis[0], "y": prop.animation_axis[1], "z": prop.animation_axis[2]}
                 multiplier = prop.animation_factor
                 min_val = -180
                 max_val = 180
               elif prop.animation_mode == "translation":
                 if hasattr(prop, 'animation_axis'):
-                  translation = prop.animation_axis
+                  translation = {"x": prop.animation_axis[0], "y": prop.animation_axis[1], "z": prop.animation_axis[2]}
                 multiplier = prop.animation_factor
                 min_val = -1
                 max_val = 1
 
-          # Write prop entry (use mesh name, not group name)
+          # Get mesh name (without extension)
           mesh_name = prop.mesh
           if mesh_name.endswith('.mesh'):
               mesh_name = mesh_name[:-5]
           elif mesh_name.endswith('.dae'):
               mesh_name = mesh_name[:-4]
 
-          f.write(f"\t\t\t[\"{mesh_name}\", [\"{group_name}\"], \"{prop.refnode}\", \"{prop.xnode}\", \"{prop.ynode}\", ")
-          f.write(f"{json.dumps(base_rotation)}, {json.dumps(rotation)}, {json.dumps(translation)}, ")
-          f.write(f"{min_val}, {max_val}, {offset}, {multiplier}],\n")
+          # Default function for non-animated props (BeamNG format)
+          func = "nop"  # BeamNG function that always returns 0 for static props
+
+          # Write prop entry in correct BeamNG format
+          f.write(f"\t\t\t[\"{func}\", \"{mesh_name}\", \"{prop.refnode}\", \"{prop.xnode}\", \"{prop.ynode}\"")
+
+          # Add transform properties only if not disabled
+          if not self.no_transform_properties:
+            f.write(f", {json.dumps(base_rotation)}, {json.dumps(rotation)}, {json.dumps(translation)}, ")
+            f.write(f"{min_val}, {max_val}, {offset}, {multiplier}")
+
+          f.write("],\n")
         f.write("\t\t],\n\n")
 
       # write nodes

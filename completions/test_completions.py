@@ -54,7 +54,8 @@ def test_zsh_completion():
 
     # Extract options from ZSH completion
     zsh_options = set()
-    option_pattern = r"'([^']*--[^']*)'|'([^']*-[^']*)'|\(([^)]*--[^)]*)\)|\(([^)]*-[^)]*)\)"
+    # Look for patterns like '--option' or '-o' in ZSH completion format
+    option_pattern = r"'[^']*\(([^)]*--[^)]*)\)[^']*'|'[^']*\(([^)]*-[^)]*)\)[^']*'|'([^']*--[^']*)\[|'([^']*-[^']*)\["
     matches = re.findall(option_pattern, content)
 
     for match in matches:
@@ -64,6 +65,19 @@ def test_zsh_completion():
                 clean_option = group.split('[')[0].split(')')[0].strip()
                 if clean_option.startswith('-'):
                     zsh_options.add(clean_option)
+
+    # Also look for simpler patterns
+    simple_pattern = r"--[\w-]+"
+    simple_matches = re.findall(simple_pattern, content)
+    for match in simple_matches:
+        zsh_options.add(match)
+
+    # Look for short options
+    short_pattern = r"(?<!')(?<!-)-[a-zA-Z](?!')"
+    short_matches = re.findall(short_pattern, content)
+    for match in short_matches:
+        if match not in ['-n', '-g']:  # Exclude common shell patterns
+            zsh_options.add(match)
 
     print(f"Found {len(zsh_options)} options in ZSH completion")
     return zsh_options
@@ -82,13 +96,27 @@ def test_powershell_completion():
 
     # Extract options from PowerShell completion
     ps_options = set()
-    option_pattern = r"'([^']*--[^']*)'|'([^']*-[^']*)'|\"([^\"]*--[^\"]*)\"|\"([^\"]*-[^\"]*)\""
+    # Look for PowerShell hash table entries like '--option' = 'description'
+    option_pattern = r"'(--[\w-]+)'|'(-[a-zA-Z])'|\"(--[\w-]+)\"|\"(-[a-zA-Z])\""
     matches = re.findall(option_pattern, content)
 
     for match in matches:
         for group in match:
             if group and group.startswith('-'):
                 ps_options.add(group)
+
+    # Also look for simpler patterns
+    simple_pattern = r"--[\w-]+"
+    simple_matches = re.findall(simple_pattern, content)
+    for match in simple_matches:
+        ps_options.add(match)
+
+    # Look for short options
+    short_pattern = r"(?<!')(?<!-)-[a-zA-Z](?!')"
+    short_matches = re.findall(short_pattern, content)
+    for match in short_matches:
+        if match not in ['-n', '-g', '-d']:  # Exclude common patterns
+            ps_options.add(match)
 
     print(f"Found {len(ps_options)} options in PowerShell completion")
     return ps_options

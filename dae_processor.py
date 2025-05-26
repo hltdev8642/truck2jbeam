@@ -314,54 +314,75 @@ class DAEProcessor:
 
     def generate_mesh_mapping(self, flexbodies: List, props: List) -> Dict[str, str]:
         """
-        Generate mesh name mapping from flexbodies and props to their group names
+        Generate mesh name mapping from flexbodies and props to their JBeam mesh names
+
+        IMPORTANT: This maps DAE mesh names to the actual mesh names used in JBeam output,
+        NOT to group names. The mesh names in DAE files should match the "mesh" property
+        in JBeam, not the group names which have "_flexbody" or "_prop" suffixes.
 
         Args:
             flexbodies: List of flexbody objects
             props: List of prop objects
 
         Returns:
-            Dictionary mapping original mesh names to group names
+            Dictionary mapping original DAE mesh names to JBeam mesh names (without extensions)
         """
         mesh_mapping = {}
 
         # Process flexbodies
         for flexbody in flexbodies:
-            if hasattr(flexbody, 'mesh') and hasattr(flexbody, 'get_group_name'):
+            if hasattr(flexbody, 'mesh'):
                 original_mesh = flexbody.mesh
-                group_name = flexbody.get_group_name()
 
-                # Remove file extension for mapping
+                # Generate JBeam mesh name (same logic as in rig.py to_jbeam method)
+                jbeam_mesh_name = original_mesh
+                if jbeam_mesh_name.endswith('.mesh'):
+                    jbeam_mesh_name = jbeam_mesh_name[:-5]
+                elif jbeam_mesh_name.endswith('.dae'):
+                    jbeam_mesh_name = jbeam_mesh_name[:-4]
+
+                # Map both with and without extensions
                 mesh_base_name = original_mesh
                 if mesh_base_name.endswith('.dae'):
                     mesh_base_name = mesh_base_name[:-4]
                 elif mesh_base_name.endswith('.mesh'):
                     mesh_base_name = mesh_base_name[:-5]
 
-                mesh_mapping[mesh_base_name] = group_name
-                mesh_mapping[original_mesh] = group_name  # Also map full name
+                # Map to the JBeam mesh name (NOT the group name)
+                mesh_mapping[mesh_base_name] = jbeam_mesh_name
+                mesh_mapping[original_mesh] = jbeam_mesh_name  # Also map full name
 
         # Process props
         for prop in props:
-            if hasattr(prop, 'mesh') and hasattr(prop, 'get_group_name'):
+            if hasattr(prop, 'mesh'):
                 original_mesh = prop.mesh
-                group_name = prop.get_group_name()
 
-                # Remove file extension for mapping
+                # Generate JBeam mesh name (same logic as in rig.py to_jbeam method)
+                jbeam_mesh_name = original_mesh
+                if jbeam_mesh_name.endswith('.mesh'):
+                    jbeam_mesh_name = jbeam_mesh_name[:-5]
+                elif jbeam_mesh_name.endswith('.dae'):
+                    jbeam_mesh_name = jbeam_mesh_name[:-4]
+
+                # Map both with and without extensions
                 mesh_base_name = original_mesh
                 if mesh_base_name.endswith('.dae'):
                     mesh_base_name = mesh_base_name[:-4]
                 elif mesh_base_name.endswith('.mesh'):
                     mesh_base_name = mesh_base_name[:-5]
 
-                mesh_mapping[mesh_base_name] = group_name
-                mesh_mapping[original_mesh] = group_name  # Also map full name
+                # Map to the JBeam mesh name (NOT the group name)
+                mesh_mapping[mesh_base_name] = jbeam_mesh_name
+                mesh_mapping[original_mesh] = jbeam_mesh_name  # Also map full name
 
         return mesh_mapping
 
     def process_dae_files_for_rig(self, rig, dae_directory: str, output_directory: Optional[str] = None) -> bool:
         """
-        Process all DAE files for a rig, modifying mesh names to match JBeam groups
+        Process all DAE files for a rig, modifying mesh names to match JBeam mesh names
+
+        IMPORTANT: This modifies DAE mesh names to match the "mesh" property values in JBeam output,
+        NOT the group names. This ensures DAE files work correctly with the generated JBeam.
 
         Args:
             rig: Rig object containing flexbodies and props

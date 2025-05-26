@@ -92,6 +92,9 @@ python truck2jbeam.py mycar.truck --author "Your Name"
 # Disable backups
 python truck2jbeam.py mycar.truck --no-backup
 
+# Exclude transform properties for cleaner output
+python truck2jbeam.py mycar.truck --no-transform-properties
+
 # Get help
 python truck2jbeam.py --help
 ```
@@ -443,6 +446,8 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - **📁 DAE File Processing**: Full COLLADA (.dae) file support for mesh extraction and synchronization
 - **🎯 Critical BeamNG Fix**: Proper node grouping ensuring flexbodies display correctly in-game
 - **⚡ Forset Support**: Enhanced forset parsing for proper flexbody node assignment
+- **🎛️ Clean Output Option**: `--no-transform-properties` flag for simplified JBeam output
+- **📐 Props Format Fix**: Corrected props format to match BeamNG documentation exactly
 - **🧪 Comprehensive Testing**: Extensive test coverage for all new features
 - **📚 Enhanced Documentation**: Complete documentation of all features and capabilities
 
