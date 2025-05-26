@@ -1,4 +1,4 @@
-from rig_common import Node, Beam, Hydro, InternalCamera, Refnodes, Rail, Slidenode, Engine, Engoption, WheelTypeA, WheelTypeB, Flexbody
+from rig_common import Node, Beam, Hydro, InternalCamera, Refnodes, Rail, Slidenode, Engine, Engoption, WheelTypeA, WheelTypeB, Flexbody, Prop, Triangle, Quad
 import re
 import sys
 
@@ -11,16 +11,17 @@ def ParseNodeName(name):
 
 
 def ParseGroupName(name):
-  return name.replace(".mesh","").replace(".","_")
+  # Replace dots with underscores to create valid group names
+  return name.replace(".", "_")
 
 
 
 
 def PrepareLine(line, skip_space_check = False):
   """Component-ize a line"""
-  if line[0] == ";" or len(line) == 0:
+  if len(line) == 0 or line[0] == ";":
       return None
-  
+
   # single statement line?
   line_has_spaces = False
   try:
@@ -39,45 +40,45 @@ def PrepareLine(line, skip_space_check = False):
 
   # strip empty / bad stuff/ spaces
   line_lst = [x for x in line_lst if x]
-  
+
   rejoined_lst = "".join(line_lst)
 
   # invalid?
   if len(rejoined_lst) == 0:
       return None
-  
+
   if rejoined_lst.endswith(","):
       rejoined_lst = rejoined_lst[:-1]
   if rejoined_lst.startswith(","):
       rejoined_lst = rejoined_lst[1:]
 
-    
+
   rejoined_lst = rejoined_lst.replace(",,",",").replace(", ",",").replace(",\t",",")
   components = rejoined_lst.split(',')
-  
+
   for c in range(len(components)):
     components[c] = components[c].strip()
-    
+
 
   # blank?
   if len(components) == 0:
     return None
   else:
     return components
-      
+
 def ParseNode(components, nodes2 = False):
   nid = ParseNodeName(components[0])
-  
-  nx = float(components[3]) 
+
+  nx = float(components[3])
   ny = float(components[1])
   nz = float(components[2])
-  
+
   flags = ''
   if len(components) >= 5:
       flags = components[4]
-  
+
   node_object = Node(nid, nx, ny, nz)
-  
+
   # flags parsing
   if 'l' in flags:
       node_object.load_bearer = True
@@ -92,11 +93,15 @@ def ParseNode(components, nodes2 = False):
       node_object.coupler = True
   if 'c' in flags:
       node_object.collision = False
-      
+
   return node_object
 
 
 def ParseFlexbody(components):
+  """Parse flexbody definition with enhanced properties"""
+  if len(components) < 10:
+    raise ValueError("Flexbody requires at least 10 components")
+
   refnode = ParseNodeName(components[0])
   xnode = ParseNodeName(components[1])
   ynode = ParseNodeName(components[2])
@@ -107,12 +112,75 @@ def ParseFlexbody(components):
   yrot = float(components[6])
   zrot = float(components[7])
   mesh = components[9]
-  return Flexbody(refnode, xnode, ynode, xoffset, yoffset, zoffset, xrot, yrot, zrot, mesh)
-  
-  
+
+  flexbody = Flexbody(refnode, xnode, ynode, xoffset, yoffset, zoffset, xrot, yrot, zrot, mesh)
+
+  # Parse additional parameters if available
+  if len(components) > 10:
+    # Parse scale factors
+    try:
+      scale_x = float(components[10])
+      scale_y = float(components[11]) if len(components) > 11 else scale_x
+      scale_z = float(components[12]) if len(components) > 12 else scale_x
+      flexbody.scale = [scale_x, scale_y, scale_z]
+    except (ValueError, IndexError):
+      pass
+
+  # Set group name from mesh
+  flexbody.group_name = ParseGroupName(mesh)
+
+  return flexbody
+
+
+def ParseProp(components):
+  """Parse prop definition"""
+  if len(components) < 10:
+    raise ValueError("Prop requires at least 10 components")
+
+  refnode = ParseNodeName(components[0])
+  xnode = ParseNodeName(components[1])
+  ynode = ParseNodeName(components[2])
+  xoffset = float(components[5])
+  yoffset = float(components[3])
+  zoffset = float(components[4])
+  xrot = float(components[8])
+  yrot = float(components[6])
+  zrot = float(components[7])
+  mesh = components[9]
+
+  prop = Prop(refnode, xnode, ynode, xoffset, yoffset, zoffset, xrot, yrot, zrot, mesh)
+
+  # Parse additional parameters if available
+  if len(components) > 10:
+    # Parse scale factors
+    try:
+      scale_x = float(components[10])
+      scale_y = float(components[11]) if len(components) > 11 else scale_x
+      scale_z = float(components[12]) if len(components) > 12 else scale_x
+      prop.scale = [scale_x, scale_y, scale_z]
+    except (ValueError, IndexError):
+      pass
+
+  # Parse animation parameters if available
+  if len(components) > 13:
+    try:
+      prop.animation_factor = float(components[13])
+      if len(components) > 14:
+        animation_mode = components[14].lower()
+        if animation_mode in ["rotation", "translation", "none"]:
+          prop.animation_mode = animation_mode
+    except (ValueError, IndexError):
+      pass
+
+  # Set group name from mesh
+  prop.group_name = ParseGroupName(mesh)
+
+  return prop
+
+
 def ParseForset(components):
   ranges = []
-  
+
   for cmps in range(len(components) -1):
     cmp = components[cmps+1]
     if "-" in cmp:
@@ -121,29 +189,29 @@ def ParseForset(components):
     else:
       nodeid = int(cmp)
       ranges.append([nodeid, nodeid])
-   
+
   return ranges
 
-  
+
 def ParseRailgroup(components):
   railgroup_id = "railgroup" + components[0]
   railgroup_nodes = []
-  
+
   for g in range(len(components) - 1):
     railgroup_nodes.append(ParseNodeName(components[g]))
-    
+
   return Rail(railgroup_id, railgroup_nodes)
-    
+
 
 def ParseSlidenode(components):
   nodeid = ParseNodeName(components[0])
   rail_nodes = []
-  
+
   spring = 9000000
   tolerance = 0
   strength = 1e400
   railgroup = None
-  
+
   for n in range(len(components) - 1):
     temp_string = components[n+1]
     if not temp_string[0] == "s" or not temp_string[0] == "b" or not temp_string[0] == "t" or not temp_string[0] == "g" or not temp_string[0] == "r" or not temp_string[0] == "d" or not temp_string[0] == "q" or not temp_string[0] == "c":
@@ -156,9 +224,9 @@ def ParseSlidenode(components):
       strength = float(temp_string[1:])
     elif temp_string[0] == "t":
       tolerance = float(temp_string[1:])
-  
+
   slidenode_object = Slidenode(nodeid, railgroup, spring, strength, tolerance)
-  
+
   if len(rail_nodes) == 0 and railgroup is not None:
     return [slidenode_object, railgroup]
   elif len(rail_nodes) > 0:
@@ -169,8 +237,8 @@ def ParseSlidenode(components):
   elif len(rail_nodes) == 0 and railgroup is None:
     print("Incorrect slidenode!! Aborting")
     sys.exit(1)
-  
-  
+
+
 
 def ParseRefnodes(components):
   center = ParseNodeName(components[0])
@@ -182,23 +250,23 @@ def ParseRefnodes(components):
 def ParseHydro(components, last_beamspring, last_beamdamp, last_beamstrength, last_beamdeform):
   nid1 = ParseNodeName(components[0])
   nid2 = ParseNodeName(components[1])
-      
+
   factor = float(components[2]) * -1
-  
+
   return Hydro(nid1, nid2, factor, last_beamspring, last_beamdamp, last_beamstrength, last_beamdeform)
 
 
 def ParseShock2(components, last_beamstrength, last_beamdeform):
   nid1 = ParseNodeName(components[0])
   nid2 = ParseNodeName(components[1])
-      
+
   spring = float(components[2])
   damp = float(components[3])
   shortbound = float(components[10])
   longbound = float(components[11])
   precomp = float(components[12])
   dampout = float(components[7])
-  
+
   # create beam
   beam_obj = Beam(nid1, nid2, spring, damp, last_beamstrength, last_beamdeform)
   beam_obj.type = 'BOUNDED'
@@ -206,27 +274,27 @@ def ParseShock2(components, last_beamstrength, last_beamdeform):
   beam_obj.beamLongBound = longbound
   beam_obj.beamPrecompression = precomp
   beam_obj.beamDampRebound = dampout
-  
+
   return beam_obj
-  
+
 
 def ParseShock(components, last_beamstrength, last_beamdeform):
   nid1 = ParseNodeName(components[0])
   nid2 = ParseNodeName(components[1])
-      
+
   spring = float(components[2])
   damp = float(components[3])
   shortbound = float(components[4])
   longbound = float(components[5])
   precomp = float(components[6])
-  
+
   # create beam
   beam_obj = Beam(nid1, nid2, spring, damp, last_beamstrength, last_beamdeform)
   beam_obj.type = 'BOUNDED'
   beam_obj.beamShortBound = shortbound
   beam_obj.beamLongBound = longbound
   beam_obj.beamPrecompression = precomp
-  
+
   return beam_obj
 
 
@@ -236,31 +304,31 @@ def ParseEngine(components):
   torque = float(components[2])
   differential = float(components[3])
   gears = []
-  
+
   # read in gear ratios
   for g in range(len(components) - 4):
     ratio = float(components[g+4])
     if ratio != -1:
       gears.append(ratio)
-  
+
   # fix reverse one
   gears[0] *= -1
-  
+
   return Engine(min_rpm, max_rpm, torque, differential, gears)
 
-  
+
 def ParseEngoption(components):
   num_components = len(components)
 
   inertia = float(components[0])
   type = components[1]
-  
+
   # get clutch force, default half for cars in RoR
   clutch_force = float(components[2]) if num_components >= 3 else 10000
   if clutch_force == 10000 and num_components < 3:
     if type == "c":
       clutch_force /= 2
-  
+
   # parse other stuff
   shift_time = float(components[3]) if num_components >= 4 else 0.2
   clutch_time = float(components[4]) if num_components >= 5 else 0.5
@@ -269,9 +337,9 @@ def ParseEngoption(components):
   idle_rpm = float(components[7]) if num_components >= 8 else 800
   max_idle_mixture = float(components[8]) if num_components >= 9 else 0.2
   min_idle_mixture = float(components[9]) if num_components >= 10 else 0.0
-  
+
   return Engoption(inertia, type, clutch_force, shift_time, clutch_time, post_shift_time, stall_rpm, idle_rpm, max_idle_mixture, min_idle_mixture)
-  
+
 def ParseBeam(components, last_beamspring, last_beamdamp, last_beamstrength, last_beamdeform):
   nid1 = ParseNodeName(components[0])
   nid2 = ParseNodeName(components[1])
@@ -279,7 +347,7 @@ def ParseBeam(components, last_beamspring, last_beamdamp, last_beamstrength, las
   flags = ''
   if len(components) >= 3:
       flags = components[2]
-  
+
   beam_obj = Beam(nid1, nid2, last_beamspring, last_beamdamp, last_beamstrength, last_beamdeform)
 
   # support beam?
@@ -287,30 +355,30 @@ def ParseBeam(components, last_beamspring, last_beamdamp, last_beamstrength, las
       beam_obj.beamDamp /= 10
       beam_obj.type = 'SUPPORT'
       beam_obj.beamLongBound = 2.0
-      
+
   return beam_obj
 
-  
+
 def ParseCinecam(components):
   xpos = float(components[2])
   ypos = float(components[0])
   zpos = float(components[1])
-  
+
   n1 = ParseNodeName(components[3])
   n2 = ParseNodeName(components[4])
   n3 = ParseNodeName(components[5])
   n4 = ParseNodeName(components[6])
   n5 = ParseNodeName(components[7])
   n6 = ParseNodeName(components[8])
-  
+
   spring = float(components[11])
   damp = float(components[12])
-  
+
   return InternalCamera(xpos, ypos, zpos, n1, n2, n3, n4, n5, n6, spring, damp)
-  
+
 
 def ParseWheel(components):
-  radius = float(components[0])  
+  radius = float(components[0])
   width = float(components[1])
   numrays = int(components[2])
   nid1 = ParseNodeName(components[3])
@@ -322,11 +390,11 @@ def ParseWheel(components):
   mass = float(components[9])
   spring = float(components[10])
   damp = float(components[11])
-  
+
   # fix negative s node ids
   if snode[0] == "-":
     snode = ParseNodeName(snode[1:])
-    
+
   return WheelTypeA(radius, width, numrays, nid1, nid2, snode, braketype, drivetype, armnode, mass, spring, damp)
 
 
@@ -346,7 +414,7 @@ def ParseFlexbodyWheel(components):
   tire_damp = float(components[12])
   hub_spring = float(components[13])
   hub_damp = float(components[14])
-  
+
   # fix negative s node ids
   if snode[0] == "-":
     snode = ParseNodeName(snode[1:])
@@ -372,16 +440,16 @@ def ParseMeshWheel(components):
   hub_damp = float(components[12])
   tire_spring = hub_spring
   tire_damp = hub_damp
-  
+
   # fix negative s node ids
   if snode[0] == "-":
     snode = ParseNodeName(snode[1:])
-  
+
   wheel_obj = WheelTypeB(tire_radius, hub_radius, width, num_rays, nid1, nid2, snode, braketype, drivetype, armnode, mass, tire_spring, tire_damp, hub_spring, hub_damp)
   wheel_obj.subtype = "meshwheels"
   return wheel_obj
 
-  
+
 def ParseWheel2(components):
   hub_radius = float(components[0])
   tire_radius = float(components[1])
@@ -398,30 +466,30 @@ def ParseWheel2(components):
   hub_damp = float(components[12])
   tire_spring = float(components[13])
   tire_damp = float(components[14])
-  
+
   # fix negative s node ids
   if snode[0] == "-":
     snode = ParseNodeName(snode[1:])
-    
+
   wheel_obj = WheelTypeB(tire_radius, hub_radius, width, num_rays, nid1, nid2, snode, braketype, drivetype, armnode, mass, tire_spring, tire_damp, hub_spring, hub_damp)
   wheel_obj.subtype = "wheels2"
   return wheel_obj
-  
+
 
 def ParseSetNodeDefaults(components):
   new_loadweight = float(components[1])
   new_friction = float(components[2])
   new_volume = float(components[3])
   new_surface = float(components[4])
-  
+
   # defaults
   new_loadweight = 0.0 if new_loadweight < 0 else new_loadweight
   new_friction = 1.0 if new_friction < 0 else new_friction
   new_volume = 1.0 if new_volume < 0 else new_volume
   new_surface = 1.0 if new_surface < 0 else new_surface
-  
+
   return [new_loadweight, new_friction, new_volume, new_surface]
-  
+
 
 
 def ParseSetBeamDefaults(components):
@@ -429,7 +497,7 @@ def ParseSetBeamDefaults(components):
   new_damp = float(components[2])
   new_deform = float(components[3])
   new_break = float(components[4])
-  
+
   # defaults
   new_spring = 9000000 if new_spring < 0 else new_spring
   new_damp = 12000 if new_damp < 0 else new_damp
@@ -438,8 +506,137 @@ def ParseSetBeamDefaults(components):
 
   return [new_spring, new_damp, new_deform, new_break]
 
-  
+
 def SetBeamBreakgroup(beam, id):
   if id == 0:
     return
   beam.breakGroup = "detacher_group_" + str(id)
+
+
+def ParseTriangle(components):
+  """Parse triangle definition from RoR format"""
+  if len(components) < 3:
+    raise ValueError("Triangle requires at least 3 nodes")
+
+  node1 = ParseNodeName(components[0])
+  node2 = ParseNodeName(components[1])
+  node3 = ParseNodeName(components[2])
+
+  # Create triangle with default collision type
+  triangle = Triangle(node1, node2, node3, "collision")
+
+  # Parse optional parameters
+  if len(components) > 3:
+    options = components[3]
+    triangle.options = list(options)
+
+    # Determine surface type based on options
+    if 'c' in options and 'v' in options:
+      triangle.surface_type = "both"
+    elif 'v' in options:
+      triangle.surface_type = "visual"
+    elif 'c' in options:
+      triangle.surface_type = "collision"
+
+  # Parse additional parameters (material, drag coefficient, etc.)
+  if len(components) > 4:
+    try:
+      triangle.drag_coefficient = float(components[4])
+    except ValueError:
+      triangle.material = components[4]
+
+  if len(components) > 5:
+    try:
+      triangle.lift_coefficient = float(components[5])
+    except ValueError:
+      pass
+
+  return triangle
+
+
+def ParseQuad(components):
+  """Parse quad definition from RoR format"""
+  if len(components) < 4:
+    raise ValueError("Quad requires at least 4 nodes")
+
+  node1 = ParseNodeName(components[0])
+  node2 = ParseNodeName(components[1])
+  node3 = ParseNodeName(components[2])
+  node4 = ParseNodeName(components[3])
+
+  # Create quad with default collision type
+  quad = Quad(node1, node2, node3, node4, "collision")
+
+  # Parse optional parameters
+  if len(components) > 4:
+    options = components[4]
+    quad.options = list(options)
+
+    # Determine surface type based on options
+    if 'c' in options and 'v' in options:
+      quad.surface_type = "both"
+    elif 'v' in options:
+      quad.surface_type = "visual"
+    elif 'c' in options:
+      quad.surface_type = "collision"
+
+  # Parse additional parameters (material, drag coefficient, etc.)
+  if len(components) > 5:
+    try:
+      quad.drag_coefficient = float(components[5])
+    except ValueError:
+      quad.material = components[5]
+
+  if len(components) > 6:
+    try:
+      quad.lift_coefficient = float(components[6])
+    except ValueError:
+      pass
+
+  return quad
+
+
+def ParseSubmeshTriangle(components):
+  """Parse triangle from submesh section (legacy format)"""
+  if len(components) < 3:
+    raise ValueError("Submesh triangle requires at least 3 nodes")
+
+  node1 = ParseNodeName(components[0])
+  node2 = ParseNodeName(components[1])
+  node3 = ParseNodeName(components[2])
+
+  # Create triangle
+  triangle = Triangle(node1, node2, node3, "collision")
+
+  # Check for collision flag in submesh format
+  if len(components) > 3:
+    options = components[3]
+    if 'c' in options:
+      triangle.surface_type = "collision"
+      triangle.options = ['c']
+    else:
+      triangle.surface_type = "visual"
+
+  return triangle
+
+
+def ParseGroupName(mesh_name):
+  """Generate a group name from mesh filename"""
+  import re
+  # Remove file extension and clean up name
+  name = mesh_name.lower()
+  if name.endswith('.mesh'):
+    name = name[:-5]
+  elif name.endswith('.dae'):
+    name = name[:-4]
+
+  # Replace hyphens and other non-alphanumeric characters with underscores
+  name = re.sub(r'[^\w_]', '_', name)
+
+  # Remove multiple consecutive underscores
+  name = re.sub(r'_+', '_', name)
+
+  # Remove leading/trailing underscores
+  name = name.strip('_')
+
+  return name if name else "unnamed"

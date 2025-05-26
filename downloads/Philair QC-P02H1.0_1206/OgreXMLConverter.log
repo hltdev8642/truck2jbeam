@@ -1,0 +1,20 @@
+09:01:44: Creating resource group General
+09:01:44: Creating resource group OgreInternal
+09:01:44: Creating resource group OgreAutodetect
+09:01:44: Registering ResourceManager for type Mesh
+09:01:44: Registering ResourceManager for type Material
+09:01:44: Registering ResourceManager for type Skeleton
+09:01:44: Warning: conversion is an older format ([MeshSerializer_v1.40]); you should upgrade it as soon as possible using the OgreMeshUpgrade tool.
+09:01:44: XMLMeshSerializer writing mesh data to C:\Users\jared\desktop\truck2jbeam\downloads\Philair QC-P02H1.0_1206\QC_Turbinprop1.mesh.xml...
+09:01:44: Populating DOM...
+09:01:44: Writing submesh...
+09:01:44: Dedicated geometry bone assignments exported.
+09:01:44: Submesh exported.
+09:01:44: Writing submesh...
+09:01:44: Dedicated geometry bone assignments exported.
+09:01:44: Submesh exported.
+09:01:44: DOM populated, writing XML file..
+09:01:44: XMLMeshSerializer export successful.
+09:01:44: Unregistering ResourceManager for type Skeleton
+09:01:44: Unregistering ResourceManager for type Material
+09:01:44: Unregistering ResourceManager for type Mesh

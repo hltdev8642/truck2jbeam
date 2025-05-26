@@ -1,0 +1,10 @@
+# Core dependencies (optional for download functionality)
+requests>=2.25.0
+beautifulsoup4>=4.9.0
+
+# Optional dependencies for DAE file processing
+lxml>=4.6.0
+
+# Development and testing dependencies (optional)
+pytest>=6.0.0
+pytest-cov>=2.10.0

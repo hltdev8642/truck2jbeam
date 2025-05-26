@@ -1,30 +1,475 @@
-import sys, os
+#!/usr/bin/env python3
+"""
+truck2jbeam - Enhanced Rigs of Rods to BeamNG.drive JBeam Converter
+
+This script converts Rigs of Rods vehicle files (.truck, .trailer, .airplane, etc.)
+to BeamNG.drive JBeam format with enhanced features and error handling.
+
+Author: Enhanced by AI Assistant
+License: MIT
+"""
+
+import sys
+import os
+import argparse
+import json
+import logging
+import time
+from pathlib import Path
+from typing import List, Optional, Dict, Any
+from dataclasses import dataclass
+
 from rig import Rig
 
+# Optional import for download functionality
+try:
+    from ror_downloader import RoRDownloader
+    DOWNLOAD_AVAILABLE = True
+except ImportError:
+    DOWNLOAD_AVAILABLE = False
+
+
+@dataclass
+class ConversionConfig:
+    """Configuration for conversion process"""
+    output_dir: Optional[str] = None
+    backup: bool = True
+    verbose: bool = False
+    dry_run: bool = False
+    force_overwrite: bool = False
+    custom_author: Optional[str] = None
+    template: Optional[str] = None
+    batch_mode: bool = False
+    # Download-related settings
+    download_dir: str = "./downloads"
+    auto_extract: bool = True
+    auto_convert: bool = False
+
+
+class ConversionStats:
+    """Track conversion statistics"""
+    def __init__(self):
+        self.files_processed = 0
+        self.files_successful = 0
+        self.files_failed = 0
+        self.start_time = time.time()
+        self.errors: List[str] = []
+
+    def add_success(self):
+        self.files_successful += 1
+        self.files_processed += 1
+
+    def add_failure(self, error: str):
+        self.files_failed += 1
+        self.files_processed += 1
+        self.errors.append(error)
+
+    def get_duration(self) -> float:
+        return time.time() - self.start_time
+
+    def print_summary(self):
+        duration = self.get_duration()
+        print(f"\n{'='*50}")
+        print(f"CONVERSION SUMMARY")
+        print(f"{'='*50}")
+        print(f"Files processed: {self.files_processed}")
+        print(f"Successful: {self.files_successful}")
+        print(f"Failed: {self.files_failed}")
+        print(f"Duration: {duration:.2f} seconds")
+
+        if self.errors:
+            print(f"\nErrors encountered:")
+            for i, error in enumerate(self.errors, 1):
+                print(f"  {i}. {error}")
+
+
+def setup_logging(verbose: bool = False) -> logging.Logger:
+    """Setup logging configuration"""
+    level = logging.DEBUG if verbose else logging.INFO
+    logging.basicConfig(
+        level=level,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        datefmt='%H:%M:%S'
+    )
+    return logging.getLogger(__name__)
+
+
+def validate_input_file(filepath: str) -> bool:
+    """Validate input file exists and has correct extension"""
+    if not os.path.isfile(filepath):
+        return False
+
+    valid_extensions = {'.truck', '.trailer', '.airplane', '.boat', '.car', '.load'}
+    ext = os.path.splitext(filepath)[1].lower()
+    return ext in valid_extensions
+
+
+def get_output_path(input_path: str, config: ConversionConfig) -> str:
+    """Generate output path based on configuration"""
+    input_file = Path(input_path)
+    output_name = input_file.stem + '.jbeam'
+
+    if config.output_dir:
+        output_dir = Path(config.output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return str(output_dir / output_name)
+    else:
+        return str(input_file.parent / output_name)
+
+
+def create_backup(filepath: str) -> bool:
+    """Create backup of existing file"""
+    if not os.path.exists(filepath):
+        return True
+
+    backup_path = filepath + '.backup'
+    try:
+        import shutil
+        shutil.copy2(filepath, backup_path)
+        return True
+    except Exception as e:
+        logging.error(f"Failed to create backup: {e}")
+        return False
+
+
+def convert_single_file(input_path: str, config: ConversionConfig, logger: logging.Logger) -> bool:
+    """Convert a single RoR file to JBeam"""
+    try:
+        # Validate input
+        if not validate_input_file(input_path):
+            raise ValueError(f"Invalid input file: {input_path}")
+
+        # Get output path
+        output_path = get_output_path(input_path, config)
+
+        # Check if output exists and handle accordingly
+        if os.path.exists(output_path) and not config.force_overwrite:
+            if not config.dry_run:
+                response = input(f"Output file {output_path} exists. Overwrite? (y/N): ")
+                if response.lower() != 'y':
+                    logger.info(f"Skipping {input_path}")
+                    return True
+
+        # Create backup if needed
+        if config.backup and os.path.exists(output_path) and not config.dry_run:
+            if not create_backup(output_path):
+                logger.warning(f"Could not create backup for {output_path}")
+
+        if config.dry_run:
+            logger.info(f"[DRY RUN] Would convert {input_path} -> {output_path}")
+            return True
+
+        # Perform conversion
+        logger.info(f"Converting {input_path}...")
+
+        rig = Rig()
+        rig.type = os.path.splitext(input_path)[1][1:].lower()
+
+        # Apply custom author if specified
+        if config.custom_author:
+            rig.authors = [config.custom_author]
+
+        logger.debug(f"Parsing {rig.type} file...")
+        rig.from_file(input_path)
+
+        logger.debug("Calculating node masses...")
+        rig.calculate_masses()
+
+        logger.debug(f"Writing JBeam to {output_path}...")
+        rig.to_jbeam(output_path)
+
+        logger.info(f"Successfully converted {input_path} -> {output_path}")
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to convert {input_path}: {e}")
+        return False
+
+
+def find_rig_files(directory: str) -> List[str]:
+    """Find all RoR rig files in directory"""
+    valid_extensions = {'.truck', '.trailer', '.airplane', '.boat', '.car', '.load'}
+    rig_files = []
+
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            if any(file.lower().endswith(ext) for ext in valid_extensions):
+                rig_files.append(os.path.join(root, file))
+
+    return rig_files
+
+
+def download_and_convert(resource_ids: List[int], search_query: str, config: ConversionConfig, logger: logging.Logger) -> bool:
+    """Download resources from RoR repository and optionally convert them"""
+    if not DOWNLOAD_AVAILABLE:
+        logger.error("Download functionality not available. Please install required dependencies:")
+        logger.error("pip install requests beautifulsoup4")
+        return False
+
+    downloader = RoRDownloader(download_dir=config.download_dir)
+    downloaded_files = []
+
+    # Download by resource IDs
+    if resource_ids:
+        for resource_id in resource_ids:
+            logger.info(f"Getting details for resource {resource_id}...")
+            resource = downloader.get_resource_details(resource_id)
+
+            if not resource:
+                logger.error(f"Resource {resource_id} not found or inaccessible")
+                continue
+
+            logger.info(f"Downloading: {resource.title}")
+
+            if config.dry_run:
+                logger.info(f"[DRY RUN] Would download {resource.title}")
+                continue
+
+            success = downloader.download_resource(resource, extract=config.auto_extract)
+
+            if success:
+                logger.info(f"✓ Successfully downloaded {resource.title}")
+                if config.auto_extract:
+                    # Find extracted files
+                    extract_dir = Path(config.download_dir) / f"{resource.title}_{resource.id}"
+                    if extract_dir.exists():
+                        downloaded_files.extend(find_rig_files(str(extract_dir)))
+            else:
+                logger.error(f"✗ Failed to download {resource.title}")
+
+    # Download by search query
+    elif search_query:
+        logger.info(f"Searching for '{search_query}' to download...")
+        resources, _ = downloader.search_resources(query=search_query, per_page=10)
+
+        if not resources:
+            logger.warning("No resources found matching search criteria")
+            return False
+
+        logger.info(f"Found {len(resources)} resources")
+
+        for resource in resources:
+            if config.dry_run:
+                logger.info(f"[DRY RUN] Would download {resource.title}")
+                continue
+
+            logger.info(f"Downloading: {resource.title}")
+            success = downloader.download_resource(resource, extract=config.auto_extract)
+
+            if success:
+                logger.info(f"✓ Successfully downloaded {resource.title}")
+                if config.auto_extract:
+                    # Find extracted files
+                    extract_dir = Path(config.download_dir) / f"{resource.title}_{resource.id}"
+                    if extract_dir.exists():
+                        downloaded_files.extend(find_rig_files(str(extract_dir)))
+            else:
+                logger.error(f"✗ Failed to download {resource.title}")
+
+    # Auto-convert downloaded files if requested
+    if config.auto_convert and downloaded_files and not config.dry_run:
+        logger.info(f"Auto-converting {len(downloaded_files)} downloaded rig files...")
+
+        conversion_stats = ConversionStats()
+        for filepath in downloaded_files:
+            logger.info(f"Converting {os.path.basename(filepath)}")
+            if convert_single_file(filepath, config, logger):
+                conversion_stats.add_success()
+            else:
+                conversion_stats.add_failure(f"Failed to convert {filepath}")
+
+        if config.verbose:
+            conversion_stats.print_summary()
+
+    return True
+
+
+def search_ror_resources(query: str, category: str, limit: int, logger: logging.Logger) -> bool:
+    """Search RoR repository and display results"""
+    if not DOWNLOAD_AVAILABLE:
+        logger.error("Download functionality not available. Please install required dependencies:")
+        logger.error("pip install requests beautifulsoup4")
+        return False
+
+    downloader = RoRDownloader()
+
+    logger.info(f"Searching for: '{query}'")
+    if category:
+        logger.info(f"Category filter: {category}")
+
+    resources, total_pages = downloader.search_resources(
+        query=query,
+        category=category,
+        per_page=limit
+    )
+
+    if resources:
+        print(f"\nFound {len(resources)} resources:")
+        print(f"{'ID':<8} {'Title':<40} {'Author':<20}")
+        print("-" * 70)
+
+        for resource in resources:
+            title = resource.title[:37] + "..." if len(resource.title) > 40 else resource.title
+            author = resource.author[:17] + "..." if len(resource.author) > 20 else resource.author
+            print(f"{resource.id:<8} {title:<40} {author:<20}")
+
+        print(f"\nTo download a resource, use: --download-ids {' '.join(str(r.id) for r in resources[:5])}")
+        print(f"Or download by search: --download-search '{query}'")
+    else:
+        logger.warning("No resources found matching your criteria")
+
+    return True
+
+
+def main():
+    """Main entry point"""
+    parser = argparse.ArgumentParser(
+        description="Convert Rigs of Rods vehicle files to BeamNG.drive JBeam format",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s mycar.truck                    # Convert single file
+  %(prog)s *.truck                        # Convert multiple files
+  %(prog)s -d /path/to/rigs --batch       # Batch convert directory
+  %(prog)s mycar.truck -o ./output        # Specify output directory
+  %(prog)s mycar.truck --dry-run          # Preview conversion
+  %(prog)s mycar.truck -v                 # Verbose output
+
+Download Examples (requires: pip install requests beautifulsoup4):
+  %(prog)s --search-ror "truck"           # Search RoR repository
+  %(prog)s --download-ids 123 456         # Download specific resources
+  %(prog)s --download-search "monster truck" --auto-convert  # Download and convert
+        """
+    )
+
+    parser.add_argument('files', nargs='*', help='RoR rig files to convert')
+    parser.add_argument('-o', '--output-dir', help='Output directory for JBeam files')
+    parser.add_argument('-d', '--directory', help='Directory to search for rig files')
+    parser.add_argument('--batch', action='store_true', help='Batch process all files in directory')
+    parser.add_argument('--backup', action='store_true', default=True, help='Create backup of existing files')
+    parser.add_argument('--no-backup', dest='backup', action='store_false', help='Don\'t create backups')
+    parser.add_argument('-f', '--force', action='store_true', help='Force overwrite existing files')
+    parser.add_argument('-v', '--verbose', action='store_true', help='Verbose output')
+    parser.add_argument('--dry-run', action='store_true', help='Show what would be done without actually converting')
+    parser.add_argument('--author', help='Set custom author name in output')
+    parser.add_argument('--version', action='version', version='truck2jbeam 2.0.0')
+
+    # Download-related arguments
+    if DOWNLOAD_AVAILABLE:
+        download_group = parser.add_argument_group('download options', 'Download resources from RoR repository')
+        download_group.add_argument('--search-ror', metavar='QUERY',
+                                   help='Search RoR repository for resources')
+        download_group.add_argument('--download-ids', type=int, nargs='+', metavar='ID',
+                                   help='Download specific resources by ID')
+        download_group.add_argument('--download-search', metavar='QUERY',
+                                   help='Search and download resources')
+        download_group.add_argument('--download-dir', default='./downloads',
+                                   help='Directory for downloads (default: ./downloads)')
+        download_group.add_argument('--category', help='Filter by category (vehicles, terrains, etc.)')
+        download_group.add_argument('--auto-convert', action='store_true',
+                                   help='Automatically convert downloaded rig files')
+        download_group.add_argument('--no-extract', dest='auto_extract', action='store_false', default=True,
+                                   help='Don\'t extract downloaded zip files')
+        download_group.add_argument('--search-limit', type=int, default=20,
+                                   help='Limit search results (default: 20)')
+
+    args = parser.parse_args()
+
+    # Setup logging
+    logger = setup_logging(args.verbose)
+
+    # Create configuration
+    config = ConversionConfig(
+        output_dir=args.output_dir,
+        backup=args.backup,
+        verbose=args.verbose,
+        dry_run=args.dry_run,
+        force_overwrite=args.force,
+        custom_author=args.author,
+        batch_mode=args.batch,
+        download_dir=getattr(args, 'download_dir', './downloads'),
+        auto_extract=getattr(args, 'auto_extract', True),
+        auto_convert=getattr(args, 'auto_convert', False)
+    )
+
+    # Handle download functionality first
+    if DOWNLOAD_AVAILABLE and hasattr(args, 'search_ror') and args.search_ror:
+        # Search RoR repository
+        search_ror_resources(args.search_ror, getattr(args, 'category', ''),
+                           getattr(args, 'search_limit', 20), logger)
+        return
+
+    if DOWNLOAD_AVAILABLE and (getattr(args, 'download_ids', None) or getattr(args, 'download_search', None)):
+        # Download from RoR repository
+        success = download_and_convert(
+            getattr(args, 'download_ids', []),
+            getattr(args, 'download_search', ''),
+            config, logger
+        )
+        if not success:
+            sys.exit(1)
+
+        # If auto-convert is disabled, exit after download
+        if not config.auto_convert:
+            return
+
+    # Collect files to process
+    files_to_process = []
+
+    if args.directory or args.batch:
+        search_dir = args.directory or '.'
+        if not os.path.isdir(search_dir):
+            logger.error(f"Directory not found: {search_dir}")
+            sys.exit(1)
+        files_to_process.extend(find_rig_files(search_dir))
+        logger.info(f"Found {len(files_to_process)} rig files in {search_dir}")
+
+    if args.files:
+        for file_pattern in args.files:
+            if '*' in file_pattern or '?' in file_pattern:
+                import glob
+                files_to_process.extend(glob.glob(file_pattern))
+            else:
+                files_to_process.append(file_pattern)
+
+    # If no files specified, show help
+    if not files_to_process:
+        parser.print_help()
+        sys.exit(1)
+
+    # Remove duplicates and validate
+    files_to_process = list(set(files_to_process))
+    valid_files = [f for f in files_to_process if validate_input_file(f)]
+
+    if not valid_files:
+        logger.error("No valid rig files found to process")
+        sys.exit(1)
+
+    if len(valid_files) != len(files_to_process):
+        invalid_count = len(files_to_process) - len(valid_files)
+        logger.warning(f"Skipping {invalid_count} invalid files")
+
+    # Process files
+    stats = ConversionStats()
+
+    logger.info(f"Processing {len(valid_files)} files...")
+
+    for i, filepath in enumerate(valid_files, 1):
+        if len(valid_files) > 1:
+            logger.info(f"[{i}/{len(valid_files)}] Processing {os.path.basename(filepath)}")
+
+        if convert_single_file(filepath, config, logger):
+            stats.add_success()
+        else:
+            stats.add_failure(f"Failed to convert {filepath}")
+
+    # Print summary
+    if len(valid_files) > 1 or config.verbose:
+        stats.print_summary()
+
+    # Exit with appropriate code
+    sys.exit(0 if stats.files_failed == 0 else 1)
+
+
 if __name__ == "__main__":
-  # have enough args?
-  args = sys.argv[1:]
-  if len(args) == 0:
-    print("Usage: truck2jbeam.py <RoR Rig File (e.g. mycar.truck)>")
-    sys.exit(1)
-  
-  # file exists?
-  rigfile = args[0]
-  if not os.path.isfile(rigfile):
-    print(args[0] + " doesn't exist! Aborting :(")
-    sys.exit(1)
-    
-  # convert file
-  r = Rig()
-  r.type = os.path.splitext(rigfile)[1][1:].lower()
-  print("Parsing *." + r.type + " file...")
-  r.from_file(rigfile)
-  
-  
-  print("Calculating node masses...")
-  r.calculate_masses()
-  
-  print("Writing JBeam...")
-  r.to_jbeam(os.path.splitext(rigfile)[0] + ".jbeam")
-  
-  print("Conversion complete!")
+    main()
