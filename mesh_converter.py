@@ -296,13 +296,19 @@ class MeshConverter:
             return None
 
     def _upgrade_mesh_format(self, mesh_path: Path) -> Optional[Path]:
-        """Upgrade mesh format using OgreMeshUpgrader"""
+        """
+        Upgrade mesh format using OgreMeshUpgrader with double pass for complete format updates
+
+        Some mesh files require multiple upgrade passes to reach the latest format,
+        especially when converting from very old Ogre versions.
+        """
         try:
+            # First upgrade pass
             cmd = [self.ogre_tools['mesh_upgrader'], str(mesh_path)]
 
-            self.logger.debug(f"Running OgreMeshUpgrader: {' '.join(cmd)}")
+            self.logger.debug(f"Running OgreMeshUpgrader (pass 1): {' '.join(cmd)}")
 
-            result = subprocess.run(
+            result1 = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
@@ -310,12 +316,32 @@ class MeshConverter:
                 cwd=mesh_path.parent
             )
 
-            if result.returncode == 0:
-                self.logger.debug("Mesh format upgraded successfully")
-                return mesh_path
+            if result1.returncode == 0:
+                self.logger.debug("Mesh format upgraded successfully (pass 1)")
             else:
-                self.logger.debug(f"OgreMeshUpgrader failed: {result.stderr}")
-                return mesh_path  # Return original path, upgrader failure is not critical
+                self.logger.debug(f"OgreMeshUpgrader pass 1 warning: {result1.stderr}")
+
+            # Second upgrade pass for complete format update
+            self.logger.debug(f"Running OgreMeshUpgrader (pass 2): {' '.join(cmd)}")
+
+            result2 = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                cwd=mesh_path.parent
+            )
+
+            if result2.returncode == 0:
+                self.logger.debug("Mesh format upgraded successfully (pass 2)")
+            else:
+                self.logger.debug(f"OgreMeshUpgrader pass 2 warning: {result2.stderr}")
+
+            # Log upgrade process details
+            if result1.stdout or result2.stdout:
+                self.logger.debug(f"Upgrade output: {result1.stdout} | {result2.stdout}")
+
+            return mesh_path
 
         except subprocess.TimeoutExpired:
             self.logger.warning("OgreMeshUpgrader timed out")
@@ -1457,7 +1483,7 @@ class MeshConverter:
     def convert_to_dae(self, mesh_data: MeshData, output_path: str,
                        coordinate_transform: bool = True) -> bool:
         """
-        Convert mesh data to COLLADA (.dae) format
+        Convert mesh data to COLLADA (.dae) format with complete material and UV support
 
         Args:
             mesh_data: Parsed mesh data
@@ -1476,34 +1502,42 @@ class MeshConverter:
             # Asset information
             asset = ET.SubElement(collada, 'asset')
             contributor = ET.SubElement(asset, 'contributor')
-            ET.SubElement(contributor, 'authoring_tool').text = 'truck2jbeam mesh converter'
+            ET.SubElement(contributor, 'authoring_tool').text = 'truck2jbeam mesh converter with Ogre3D pipeline'
             ET.SubElement(asset, 'created').text = '2024-01-01T00:00:00Z'
             ET.SubElement(asset, 'modified').text = '2024-01-01T00:00:00Z'
 
-            # Up axis (BeamNG uses Y-up)
-            ET.SubElement(asset, 'up_axis').text = 'Y_UP'
+            # Up axis (BeamNG uses Y-up, but we need Z-up for proper orientation)
+            ET.SubElement(asset, 'up_axis').text = 'Z_UP'
 
-            # Library geometries
-            lib_geometries = ET.SubElement(collada, 'library_geometries')
-            geometry = ET.SubElement(lib_geometries, 'geometry')
-            geometry.set('id', f"{mesh_data.name}-geometry")
-            geometry.set('name', mesh_data.name)
-
-            mesh_elem = ET.SubElement(geometry, 'mesh')
-
-            # Prepare consolidated vertex and face data
-            all_vertices = []
+            # Prepare consolidated vertex data with all attributes
+            all_positions = []
+            all_normals = []
+            all_uvs = []
             all_faces = []
+
+            # Helper function to transform coordinates
+            def transform_position(pos):
+                x, y, z = pos
+                if coordinate_transform:
+                    # RoR to BeamNG: X->X, Y->Z, Z->Y (with Z-up orientation)
+                    return (x, -z, y)
+                else:
+                    return (x, y, z)
+
+            def transform_normal(normal):
+                nx, ny, nz = normal
+                if coordinate_transform:
+                    # Transform normals with same coordinate system
+                    return (nx, -nz, ny)
+                else:
+                    return (nx, ny, nz)
 
             # Add shared vertices if present
             if mesh_data.vertices:
                 for vertex in mesh_data.vertices:
-                    x, y, z = vertex.position
-                    if coordinate_transform:
-                        # Apply RoR to BeamNG coordinate transformation
-                        all_vertices.append((x, z, y))  # X stays, Y->Z, Z->Y
-                    else:
-                        all_vertices.append((x, y, z))
+                    all_positions.append(transform_position(vertex.position))
+                    all_normals.append(transform_normal(vertex.normal))
+                    all_uvs.append(vertex.uv)
 
                 # Add faces that use shared vertices
                 for face in mesh_data.faces:
@@ -1512,14 +1546,12 @@ class MeshConverter:
             # Add submesh-specific vertices
             for submesh in mesh_data.submeshes:
                 if not submesh.use_shared_vertices and submesh.vertices:
-                    submesh_start = len(all_vertices)
+                    submesh_start = len(all_positions)
 
                     for vertex in submesh.vertices:
-                        x, y, z = vertex.position
-                        if coordinate_transform:
-                            all_vertices.append((x, z, y))
-                        else:
-                            all_vertices.append((x, y, z))
+                        all_positions.append(transform_position(vertex.position))
+                        all_normals.append(transform_normal(vertex.normal))
+                        all_uvs.append(vertex.uv)
 
                     # Add submesh faces with adjusted indices
                     for face in submesh.faces:
@@ -1534,55 +1566,35 @@ class MeshConverter:
                     for face in submesh.faces:
                         all_faces.append(face.vertices)
 
-            # Vertices source
-            positions_source = ET.SubElement(mesh_elem, 'source')
-            positions_source.set('id', f"{mesh_data.name}-positions")
+            # Create material library
+            self._create_dae_material_library(collada, mesh_data)
 
-            positions_array = ET.SubElement(positions_source, 'float_array')
-            positions_array.set('id', f"{mesh_data.name}-positions-array")
-            positions_array.set('count', str(len(all_vertices) * 3))
+            # Library geometries
+            lib_geometries = ET.SubElement(collada, 'library_geometries')
+            geometry = ET.SubElement(lib_geometries, 'geometry')
+            geometry.set('id', f"{mesh_data.name}-geometry")
+            geometry.set('name', mesh_data.name)
 
-            # Build position data
-            position_data = []
-            for vertex in all_vertices:
-                position_data.extend(vertex)
+            mesh_elem = ET.SubElement(geometry, 'mesh')
 
-            positions_array.text = ' '.join(map(str, position_data))
+            # Create position source
+            self._create_dae_position_source(mesh_elem, mesh_data.name, all_positions)
 
-            # Position accessor
-            positions_technique = ET.SubElement(positions_source, 'technique_common')
-            positions_accessor = ET.SubElement(positions_technique, 'accessor')
-            positions_accessor.set('source', f"#{mesh_data.name}-positions-array")
-            positions_accessor.set('count', str(len(all_vertices)))
-            positions_accessor.set('stride', '3')
+            # Create normal source
+            self._create_dae_normal_source(mesh_elem, mesh_data.name, all_normals)
 
-            ET.SubElement(positions_accessor, 'param', name='X', type='float')
-            ET.SubElement(positions_accessor, 'param', name='Y', type='float')
-            ET.SubElement(positions_accessor, 'param', name='Z', type='float')
+            # Create UV source
+            self._create_dae_uv_source(mesh_elem, mesh_data.name, all_uvs)
 
-            # Vertices element
+            # Vertices element (references position source)
             vertices = ET.SubElement(mesh_elem, 'vertices')
             vertices.set('id', f"{mesh_data.name}-vertices")
             vertices_input = ET.SubElement(vertices, 'input')
             vertices_input.set('semantic', 'POSITION')
             vertices_input.set('source', f"#{mesh_data.name}-positions")
 
-            # Triangles
-            triangles = ET.SubElement(mesh_elem, 'triangles')
-            triangles.set('count', str(len(all_faces)))
-
-            triangles_input = ET.SubElement(triangles, 'input')
-            triangles_input.set('semantic', 'VERTEX')
-            triangles_input.set('source', f"#{mesh_data.name}-vertices")
-            triangles_input.set('offset', '0')
-
-            # Face indices
-            face_indices = []
-            for face in all_faces:
-                face_indices.extend(face)
-
-            p_elem = ET.SubElement(triangles, 'p')
-            p_elem.text = ' '.join(map(str, face_indices))
+            # Create triangles with material binding
+            self._create_dae_triangles(mesh_elem, mesh_data, all_faces)
 
             # Library visual scenes
             lib_visual_scenes = ET.SubElement(collada, 'library_visual_scenes')
@@ -1622,6 +1634,195 @@ class MeshConverter:
         except Exception as e:
             self.logger.error(f"Error converting mesh to DAE: {e}")
             return False
+
+    def _create_dae_material_library(self, collada: ET.Element, mesh_data: MeshData) -> None:
+        """Create material library for DAE file"""
+        # Library images (for textures)
+        lib_images = ET.SubElement(collada, 'library_images')
+
+        # Library materials
+        lib_materials = ET.SubElement(collada, 'library_materials')
+
+        # Library effects
+        lib_effects = ET.SubElement(collada, 'library_effects')
+
+        for material in mesh_data.materials:
+            # Create effect
+            effect = ET.SubElement(lib_effects, 'effect')
+            effect.set('id', f"{material.name}-effect")
+
+            profile_common = ET.SubElement(effect, 'profile_COMMON')
+
+            # Add texture if available
+            if material.diffuse_texture:
+                # Create image
+                image = ET.SubElement(lib_images, 'image')
+                image.set('id', f"{material.name}-image")
+                image.set('name', f"{material.name}-image")
+                init_from = ET.SubElement(image, 'init_from')
+                init_from.text = material.diffuse_texture
+
+                # Create surface and sampler in effect
+                newparam_surface = ET.SubElement(profile_common, 'newparam')
+                newparam_surface.set('sid', f"{material.name}-surface")
+                surface = ET.SubElement(newparam_surface, 'surface')
+                surface.set('type', '2D')
+                ET.SubElement(surface, 'init_from').text = f"{material.name}-image"
+
+                newparam_sampler = ET.SubElement(profile_common, 'newparam')
+                newparam_sampler.set('sid', f"{material.name}-sampler")
+                sampler2d = ET.SubElement(newparam_sampler, 'sampler2D')
+                ET.SubElement(sampler2d, 'source').text = f"{material.name}-surface"
+
+            # Technique
+            technique = ET.SubElement(profile_common, 'technique')
+            technique.set('sid', 'common')
+
+            phong = ET.SubElement(technique, 'phong')
+
+            # Diffuse
+            diffuse = ET.SubElement(phong, 'diffuse')
+            if material.diffuse_texture:
+                texture = ET.SubElement(diffuse, 'texture')
+                texture.set('texture', f"{material.name}-sampler")
+                texture.set('texcoord', 'UVMap')
+            else:
+                color = ET.SubElement(diffuse, 'color')
+                color.text = f"{material.diffuse_color[0]} {material.diffuse_color[1]} {material.diffuse_color[2]} {material.diffuse_color[3]}"
+
+            # Specular
+            specular = ET.SubElement(phong, 'specular')
+            spec_color = ET.SubElement(specular, 'color')
+            spec_color.text = f"{material.specular_color[0]} {material.specular_color[1]} {material.specular_color[2]} 1.0"
+
+            # Shininess
+            shininess = ET.SubElement(phong, 'shininess')
+            shininess_float = ET.SubElement(shininess, 'float')
+            shininess_float.text = str(material.shininess)
+
+            # Create material
+            mat = ET.SubElement(lib_materials, 'material')
+            mat.set('id', f"{material.name}-material")
+            mat.set('name', material.name)
+            instance_effect = ET.SubElement(mat, 'instance_effect')
+            instance_effect.set('url', f"#{material.name}-effect")
+
+    def _create_dae_position_source(self, mesh_elem: ET.Element, mesh_name: str, positions: List[Tuple[float, float, float]]) -> None:
+        """Create position source for DAE mesh"""
+        positions_source = ET.SubElement(mesh_elem, 'source')
+        positions_source.set('id', f"{mesh_name}-positions")
+
+        positions_array = ET.SubElement(positions_source, 'float_array')
+        positions_array.set('id', f"{mesh_name}-positions-array")
+        positions_array.set('count', str(len(positions) * 3))
+
+        # Build position data
+        position_data = []
+        for pos in positions:
+            position_data.extend(pos)
+
+        positions_array.text = ' '.join(map(str, position_data))
+
+        # Position accessor
+        positions_technique = ET.SubElement(positions_source, 'technique_common')
+        positions_accessor = ET.SubElement(positions_technique, 'accessor')
+        positions_accessor.set('source', f"#{mesh_name}-positions-array")
+        positions_accessor.set('count', str(len(positions)))
+        positions_accessor.set('stride', '3')
+
+        ET.SubElement(positions_accessor, 'param', name='X', type='float')
+        ET.SubElement(positions_accessor, 'param', name='Y', type='float')
+        ET.SubElement(positions_accessor, 'param', name='Z', type='float')
+
+    def _create_dae_normal_source(self, mesh_elem: ET.Element, mesh_name: str, normals: List[Tuple[float, float, float]]) -> None:
+        """Create normal source for DAE mesh"""
+        normals_source = ET.SubElement(mesh_elem, 'source')
+        normals_source.set('id', f"{mesh_name}-normals")
+
+        normals_array = ET.SubElement(normals_source, 'float_array')
+        normals_array.set('id', f"{mesh_name}-normals-array")
+        normals_array.set('count', str(len(normals) * 3))
+
+        # Build normal data
+        normal_data = []
+        for normal in normals:
+            normal_data.extend(normal)
+
+        normals_array.text = ' '.join(map(str, normal_data))
+
+        # Normal accessor
+        normals_technique = ET.SubElement(normals_source, 'technique_common')
+        normals_accessor = ET.SubElement(normals_technique, 'accessor')
+        normals_accessor.set('source', f"#{mesh_name}-normals-array")
+        normals_accessor.set('count', str(len(normals)))
+        normals_accessor.set('stride', '3')
+
+        ET.SubElement(normals_accessor, 'param', name='X', type='float')
+        ET.SubElement(normals_accessor, 'param', name='Y', type='float')
+        ET.SubElement(normals_accessor, 'param', name='Z', type='float')
+
+    def _create_dae_uv_source(self, mesh_elem: ET.Element, mesh_name: str, uvs: List[Tuple[float, float]]) -> None:
+        """Create UV source for DAE mesh"""
+        uvs_source = ET.SubElement(mesh_elem, 'source')
+        uvs_source.set('id', f"{mesh_name}-uvs")
+
+        uvs_array = ET.SubElement(uvs_source, 'float_array')
+        uvs_array.set('id', f"{mesh_name}-uvs-array")
+        uvs_array.set('count', str(len(uvs) * 2))
+
+        # Build UV data
+        uv_data = []
+        for uv in uvs:
+            uv_data.extend(uv)
+
+        uvs_array.text = ' '.join(map(str, uv_data))
+
+        # UV accessor
+        uvs_technique = ET.SubElement(uvs_source, 'technique_common')
+        uvs_accessor = ET.SubElement(uvs_technique, 'accessor')
+        uvs_accessor.set('source', f"#{mesh_name}-uvs-array")
+        uvs_accessor.set('count', str(len(uvs)))
+        uvs_accessor.set('stride', '2')
+
+        ET.SubElement(uvs_accessor, 'param', name='S', type='float')
+        ET.SubElement(uvs_accessor, 'param', name='T', type='float')
+
+    def _create_dae_triangles(self, mesh_elem: ET.Element, mesh_data: MeshData, all_faces: List[Tuple[int, int, int]]) -> None:
+        """Create triangles element with proper input bindings"""
+        triangles = ET.SubElement(mesh_elem, 'triangles')
+        triangles.set('count', str(len(all_faces)))
+
+        # Add material if available
+        if mesh_data.materials:
+            triangles.set('material', f"{mesh_data.materials[0].name}-material")
+
+        # Input for vertices (positions)
+        vertex_input = ET.SubElement(triangles, 'input')
+        vertex_input.set('semantic', 'VERTEX')
+        vertex_input.set('source', f"#{mesh_data.name}-vertices")
+        vertex_input.set('offset', '0')
+
+        # Input for normals
+        normal_input = ET.SubElement(triangles, 'input')
+        normal_input.set('semantic', 'NORMAL')
+        normal_input.set('source', f"#{mesh_data.name}-normals")
+        normal_input.set('offset', '1')
+
+        # Input for UVs
+        uv_input = ET.SubElement(triangles, 'input')
+        uv_input.set('semantic', 'TEXCOORD')
+        uv_input.set('source', f"#{mesh_data.name}-uvs")
+        uv_input.set('offset', '2')
+        uv_input.set('set', '0')
+
+        # Face indices (each vertex needs position, normal, and UV indices)
+        face_indices = []
+        for face in all_faces:
+            for vertex_idx in face:
+                face_indices.extend([vertex_idx, vertex_idx, vertex_idx])  # pos, normal, uv all use same index
+
+        p_elem = ET.SubElement(triangles, 'p')
+        p_elem.text = ' '.join(map(str, face_indices))
 
     def convert_to_blend(self, mesh_data: MeshData, output_path: str,
                         coordinate_transform: bool = True) -> bool:

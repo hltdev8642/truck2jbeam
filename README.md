@@ -33,6 +33,37 @@ truck2jbeam is an enhanced converter for Rigs of Rods (RoR) vehicle files to Bea
 - Python 3.7 or higher
 - **Optional for download functionality**: `pip install requests beautifulsoup4`
 - **Optional for DAE processing**: `pip install lxml` (recommended for better performance)
+- **Optional for enhanced mesh conversion**: Ogre3D tools (OgreMeshUpgrader.exe, OgreXMLConverter.exe)
+
+### Ogre3D Tools Setup (Recommended)
+
+For the highest quality mesh conversion, install the official Ogre3D tools:
+
+#### Windows
+1. Download Ogre3D SDK from [ogre3d.org](https://www.ogre3d.org/download/sdk)
+2. Extract to `C:\OgreSDK\` or add tools to your PATH
+3. Ensure `OgreMeshUpgrader.exe` and `OgreXMLConverter.exe` are accessible
+
+#### Linux/macOS
+```bash
+# Ubuntu/Debian
+sudo apt-get install ogre-1.9-tools
+
+# macOS with Homebrew
+brew install ogre
+
+# Or compile from source
+git clone https://github.com/OGRECave/ogre.git
+```
+
+#### Tool Detection
+The converter automatically searches for Ogre tools in:
+- Current directory and `./tools/` subdirectory
+- System PATH
+- Common installation directories (`C:\OgreSDK\bin`, `/usr/bin`, `/usr/local/bin`)
+
+#### Fallback Behavior
+If Ogre tools are not found, the converter falls back to custom binary parsing with reduced accuracy.
 
 ### Quick Start
 1. Download or clone this repository
@@ -492,6 +523,14 @@ The converter generates BeamNG.drive compatible JBeam files with:
 - Check DAE file structure and validity
 - Verify mesh name mappings are correct
 - Ensure output directory permissions
+
+**Mesh conversion and orientation issues**
+- Install Ogre3D tools for best results: `OgreMeshUpgrader.exe` and `OgreXMLConverter.exe`
+- Check that meshes appear in correct positions in BeamNG.drive
+- Verify coordinate transformation is working (RoR Y→BeamNG Z, RoR Z→BeamNG Y)
+- Ensure DAE files include complete material and UV information
+- For incorrect orientations, check that Z-up axis is set in DAE files
+- If meshes are missing textures, verify material library is included in DAE output
 
 ### Getting Help
 1. Run with `--verbose` for detailed output
