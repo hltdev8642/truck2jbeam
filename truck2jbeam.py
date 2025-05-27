@@ -2,7 +2,7 @@
 """
 truck2jbeam - Enhanced Rigs of Rods to BeamNG.drive JBeam Converter
 
-This script converts Rigs of Rods vehicle files (.truck, .trailer, .airplane, etc.)
+This script converts Rigs of Rods vehicle files (.truck, .trailer, .airplane, .train, etc.)
 to BeamNG.drive JBeam format with enhanced features and error handling.
 
 Author: Enhanced by AI Assistant
@@ -56,6 +56,9 @@ class ConversionConfig:
     include_stats: bool = False
     min_mass: Optional[float] = None
     no_transform_properties: bool = False
+    convert_meshes: bool = False
+    mesh_output_format: str = 'dae'
+    mesh_output_dir: Optional[str] = None
     # Download-related settings
     download_dir: str = "./downloads"
     auto_extract: bool = True
@@ -115,7 +118,7 @@ def validate_input_file(filepath: str) -> bool:
     if not os.path.isfile(filepath):
         return False
 
-    valid_extensions = {'.truck', '.trailer', '.airplane', '.boat', '.car', '.load'}
+    valid_extensions = {'.truck', '.trailer', '.airplane', '.boat', '.car', '.load', '.train'}
     ext = os.path.splitext(filepath)[1].lower()
     return ext in valid_extensions
 
@@ -234,6 +237,26 @@ def convert_single_file(input_path: str, config: ConversionConfig, logger: loggi
             except Exception as e:
                 logger.warning(f"DAE processing error: {e}")
 
+        # Convert mesh files if requested
+        if config.convert_meshes:
+            mesh_dir = config.mesh_output_dir or os.path.dirname(input_path)
+            output_dir = config.mesh_output_dir or os.path.join(os.path.dirname(output_path), "meshes")
+
+            logger.info(f"Converting .mesh files to {config.mesh_output_format} format...")
+            try:
+                # Apply coordinate transformation unless disabled by no_transform_properties
+                coordinate_transform = not config.no_transform_properties
+
+                success = rig.convert_mesh_files(
+                    mesh_dir, output_dir, config.mesh_output_format, coordinate_transform
+                )
+                if success:
+                    logger.info(f"Mesh files converted successfully to {output_dir}")
+                else:
+                    logger.warning("Mesh file conversion failed")
+            except Exception as e:
+                logger.warning(f"Mesh conversion error: {e}")
+
         logger.debug(f"Writing JBeam to {output_path}...")
         rig.to_jbeam(output_path)
 
@@ -247,7 +270,7 @@ def convert_single_file(input_path: str, config: ConversionConfig, logger: loggi
 
 def find_rig_files(directory: str) -> List[str]:
     """Find all RoR rig files in directory"""
-    valid_extensions = {'.truck', '.trailer', '.airplane', '.boat', '.car', '.load'}
+    valid_extensions = {'.truck', '.trailer', '.airplane', '.boat', '.car', '.load', '.train'}
     rig_files = []
 
     for root, dirs, files in os.walk(directory):
@@ -412,7 +435,7 @@ Configuration:
         """
     )
 
-    parser.add_argument('files', nargs='*', help='RoR rig files to convert')
+    parser.add_argument('files', nargs='*', help='RoR rig files to convert (.truck, .trailer, .airplane, .boat, .car, .load, .train)')
     parser.add_argument('-o', '--output-dir', help='Output directory for JBeam files')
     parser.add_argument('-d', '--directory', help='Directory to search for rig files')
     parser.add_argument('--batch', action='store_true', help='Batch process all files in directory')
@@ -442,6 +465,12 @@ Configuration:
                                help='Override minimum node mass (default: 50.0)')
     enhanced_group.add_argument('--no-transform-properties', action='store_true',
                                help='Exclude rotation, translation, and scale properties from flexbodies and props')
+    enhanced_group.add_argument('--convert-meshes', action='store_true',
+                               help='Convert .mesh files to .dae/.blend format')
+    enhanced_group.add_argument('--mesh-output-format', choices=['dae', 'blend', 'both'], default='dae',
+                               help='Output format for converted meshes (default: dae)')
+    enhanced_group.add_argument('--mesh-output-dir', metavar='DIR',
+                               help='Output directory for converted mesh files')
 
     # Download-related arguments
     if DOWNLOAD_AVAILABLE:
@@ -486,6 +515,9 @@ Configuration:
         include_stats=getattr(args, 'include_stats', False),
         min_mass=getattr(args, 'min_mass', None),
         no_transform_properties=getattr(args, 'no_transform_properties', False),
+        convert_meshes=getattr(args, 'convert_meshes', False),
+        mesh_output_format=getattr(args, 'mesh_output_format', 'dae'),
+        mesh_output_dir=getattr(args, 'mesh_output_dir', None),
         # Download settings
         download_dir=getattr(args, 'download_dir', './downloads'),
         auto_extract=getattr(args, 'auto_extract', True),

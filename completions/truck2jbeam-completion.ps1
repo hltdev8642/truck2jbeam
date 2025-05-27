@@ -49,6 +49,9 @@ Register-ArgumentCompleter -CommandName 'truck2jbeam.py', 'python' -ParameterNam
         '--include-stats' = 'Include conversion statistics in JBeam output'
         '--min-mass' = 'Override minimum node mass'
         '--no-transform-properties' = 'Exclude rotation, translation, and scale properties from flexbodies and props'
+        '--convert-meshes' = 'Convert .mesh files to .dae/.blend format'
+        '--mesh-output-format' = 'Output format for converted meshes (dae, blend, both)'
+        '--mesh-output-dir' = 'Output directory for converted mesh files'
 
         # Download options
         '--search-ror' = 'Search RoR repository for resources'
@@ -68,7 +71,7 @@ Register-ArgumentCompleter -CommandName 'truck2jbeam.py', 'python' -ParameterNam
     $categories = @('vehicles', 'terrains', 'aircraft', 'boats', 'trailers', 'loads', 'skins', 'tools')
 
     # RoR file extensions
-    $rorExtensions = @('*.truck', '*.trailer', '*.airplane', '*.boat', '*.car', '*.load')
+    $rorExtensions = @('*.truck', '*.trailer', '*.airplane', '*.boat', '*.car', '*.load', '*.train')
 
     # Get the current word being completed
     $currentWord = $wordToComplete

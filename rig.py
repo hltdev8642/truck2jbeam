@@ -71,6 +71,14 @@ class Rig:
         # DAE processor for mesh name handling
         self.dae_processor = DAEProcessor()
 
+        # Mesh converter for .mesh to .dae/.blend conversion
+        try:
+            from mesh_converter import MeshConverter
+            self.mesh_converter = MeshConverter()
+        except ImportError:
+            self.mesh_converter = None
+            self.logger.warning("Mesh converter not available")
+
         # Flag to exclude transform properties from JBeam output
         self.no_transform_properties = False
 
@@ -1391,3 +1399,96 @@ class Rig:
 
       f.write("\t}\n}")
       f.close()
+
+    def convert_mesh_files(self, mesh_directory: str, output_directory: str,
+                          output_format: str = 'dae', coordinate_transform: bool = True) -> bool:
+        """
+        Convert .mesh files referenced in this rig to .dae/.blend format
+
+        Args:
+            mesh_directory: Directory containing .mesh files
+            output_directory: Directory for converted mesh files
+            output_format: Output format ('dae', 'blend', or 'both')
+            coordinate_transform: Apply RoR to BeamNG coordinate transformation
+
+        Returns:
+            True if conversion successful, False otherwise
+        """
+        if not self.mesh_converter:
+            self.logger.error("Mesh converter not available")
+            return False
+
+        if not os.path.exists(mesh_directory):
+            self.logger.error(f"Mesh directory not found: {mesh_directory}")
+            return False
+
+        # Extract mesh files referenced in this rig
+        referenced_meshes = self.mesh_converter.extract_mesh_files_from_rig(self)
+
+        if not referenced_meshes:
+            self.logger.info("No .mesh files referenced in this rig")
+            return True
+
+        # Find actual mesh files in the directory
+        mesh_files = []
+        for mesh_name in referenced_meshes:
+            mesh_path = os.path.join(mesh_directory, mesh_name)
+            if os.path.exists(mesh_path):
+                mesh_files.append(mesh_path)
+            else:
+                self.logger.warning(f"Referenced mesh file not found: {mesh_path}")
+
+        if not mesh_files:
+            self.logger.warning("No referenced mesh files found in directory")
+            return False
+
+        # Generate mesh name mapping for duplicate resolution
+        mesh_mapping = self.mesh_converter.generate_mesh_conversion_mapping(self)
+
+        # Convert meshes
+        self.logger.info(f"Converting {len(mesh_files)} mesh files to {output_format} format...")
+        results = self.mesh_converter.batch_convert_meshes(
+            mesh_files, output_directory, output_format, mesh_mapping, coordinate_transform
+        )
+
+        # Report results
+        success_count = sum(1 for outputs in results.values() if outputs)
+        total_count = len(results)
+
+        self.logger.info(f"Mesh conversion completed: {success_count}/{total_count} files converted")
+
+        # Log detailed results
+        for mesh_file, output_files in results.items():
+            if output_files:
+                self.logger.info(f"  {os.path.basename(mesh_file)} -> {[os.path.basename(f) for f in output_files]}")
+            else:
+                self.logger.warning(f"  {os.path.basename(mesh_file)} -> FAILED")
+
+        return success_count > 0
+
+    def get_mesh_conversion_statistics(self) -> Dict[str, Any]:
+        """
+        Get statistics about mesh files referenced in this rig
+
+        Returns:
+            Dictionary containing mesh conversion statistics
+        """
+        if not self.mesh_converter:
+            return {"error": "Mesh converter not available"}
+
+        # Extract mesh files
+        referenced_meshes = self.mesh_converter.extract_mesh_files_from_rig(self)
+        mesh_mapping = self.mesh_converter.generate_mesh_conversion_mapping(self)
+
+        # Count by type
+        flexbody_meshes = [fb.mesh for fb in self.flexbodies if hasattr(fb, 'mesh') and fb.mesh.endswith('.mesh')]
+        prop_meshes = [p.mesh for p in self.props if hasattr(p, 'mesh') and p.mesh.endswith('.mesh')]
+
+        return {
+            "total_mesh_files": len(referenced_meshes),
+            "flexbody_meshes": len(flexbody_meshes),
+            "prop_meshes": len(prop_meshes),
+            "unique_meshes": len(set(referenced_meshes)),
+            "mesh_name_mapping": mesh_mapping,
+            "referenced_files": referenced_meshes
+        }

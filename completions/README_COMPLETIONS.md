@@ -42,7 +42,7 @@ Add-Content -Path $PROFILE -Value ". path\to\completions\truck2jbeam-completion.
 Both completion systems provide intelligent suggestions for:
 
 - **Command Options**: All available flags and parameters
-- **File Types**: RoR files (*.truck, *.trailer, *.airplane, etc.)
+- **File Types**: RoR files (*.truck, *.trailer, *.airplane, *.train, etc.)
 - **Templates**: car, truck, airplane, trailer
 - **Categories**: vehicles, terrains, aircraft, boats, etc.
 - **Directories**: For output paths and DAE processing
@@ -59,7 +59,7 @@ truck2jbeam.py --template <TAB>
 
 # File completion
 truck2jbeam.py <TAB>
-# Shows: *.truck, *.trailer, *.airplane, *.boat, *.car, *.load files
+# Shows: *.truck, *.trailer, *.airplane, *.boat, *.car, *.load, *.train files
 
 # Directory completion
 truck2jbeam.py --output-dir <TAB>
@@ -94,6 +94,9 @@ truck2jbeam.py --category <TAB>
 - `--include-stats` - Include statistics
 - `--min-mass` - Minimum mass override
 - `--no-transform-properties` - Exclude rotation, translation, and scale properties
+- `--convert-meshes` - Convert .mesh files to .dae/.blend format
+- `--mesh-output-format` - Output format for converted meshes
+- `--mesh-output-dir` - Output directory for converted mesh files
 
 ### Download Options
 - `--search-ror` - Search RoR repository

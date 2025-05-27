@@ -5,7 +5,7 @@
 
 ## Overview
 
-truck2jbeam is an enhanced converter for Rigs of Rods (RoR) vehicle files to BeamNG.drive JBeam format. This tool converts `.truck`, `.trailer`, `.airplane`, `.boat`, `.car`, and `.load` files into BeamNG-compatible `.jbeam` files with comprehensive error handling, validation, and customization options.
+truck2jbeam is an enhanced converter for Rigs of Rods (RoR) vehicle files to BeamNG.drive JBeam format. This tool converts `.truck`, `.trailer`, `.airplane`, `.boat`, `.car`, `.load`, and `.train` files into BeamNG-compatible `.jbeam` files with comprehensive error handling, validation, and customization options.
 
 ### Key Features
 
@@ -95,6 +95,12 @@ python truck2jbeam.py mycar.truck --no-backup
 # Exclude transform properties for cleaner output
 python truck2jbeam.py mycar.truck --no-transform-properties
 
+# Convert .mesh files to .dae format
+python truck2jbeam.py mycar.truck --convert-meshes --mesh-output-dir ./converted_meshes
+
+# Convert .mesh files to both .dae and .blend formats
+python truck2jbeam.py mycar.truck --convert-meshes --mesh-output-format both
+
 # Get help
 python truck2jbeam.py --help
 ```
@@ -135,6 +141,30 @@ python -c "from rig import Rig; r = Rig(); print(r.extract_dae_mesh_names('./mes
 
 # Synchronize DAE files with JBeam output
 python -c "from rig import Rig; r = Rig(); r.from_file('vehicle.truck'); r.process_dae_files('./meshes', './output')"
+```
+
+#### Mesh File Conversion
+```bash
+# Convert .mesh files to .dae format (default)
+python truck2jbeam.py vehicle.truck --convert-meshes
+
+# Convert to specific format
+python truck2jbeam.py vehicle.truck --convert-meshes --mesh-output-format dae
+python truck2jbeam.py vehicle.truck --convert-meshes --mesh-output-format blend
+python truck2jbeam.py vehicle.truck --convert-meshes --mesh-output-format both
+
+# Specify output directory for converted meshes
+python truck2jbeam.py vehicle.truck --convert-meshes --mesh-output-dir ./converted_meshes
+
+# Convert with coordinate transformation disabled
+python truck2jbeam.py vehicle.truck --convert-meshes --no-transform-properties
+
+# Features include:
+# - Automatic .mesh file detection from flexbodies and props
+# - Coordinate system conversion (RoR to BeamNG)
+# - Mesh name synchronization with JBeam output
+# - Duplicate mesh name resolution
+# - Support for both .dae (COLLADA) and .blend (Blender) output
 ```
 
 ### Configuration Management
@@ -265,6 +295,50 @@ Comprehensive COLLADA (.dae) file support for mesh synchronization:
 2. **Resolve**: Apply duplicate mesh name resolution
 3. **Synchronize**: Update DAE files to match JBeam group names
 4. **Validate**: Ensure consistency between DAE and JBeam files
+
+### 🔄 Enhanced Mesh File Conversion
+
+Advanced .mesh to .dae/.blend conversion with robust Ogre3D parsing and full BeamNG.drive integration:
+
+#### 🔧 Robust Parsing Engine
+- **Binary Mesh Support**: Proper Ogre3D chunk-based parsing following official specification
+- **XML Mesh Support**: Complete XML schema support with shared/submesh geometry
+- **Header Validation**: Version checking, endianness detection, and format verification
+- **Error Recovery**: Graceful handling of malformed files with fallback mesh generation
+- **Performance Optimized**: Memory-efficient streaming for large mesh files
+
+#### 🎯 Enhanced Format Support
+- **Binary Ogre Mesh**: Chunk parsing (header 0x1000, submesh 0x4000, bounds 0x9000)
+- **XML Ogre Mesh**: Shared geometry, submesh-specific vertices, multiple UV sets
+- **Advanced Attributes**: Vertex colors, tangents, binormals, skeleton links
+- **Material Extraction**: Proper material name parsing and mapping
+- **Bounding Boxes**: Automatic bounds detection and preservation
+
+#### 🌐 Accurate Coordinate Transformation
+- **RoR System**: X=right, Y=forward, Z=up
+- **BeamNG System**: X=right, Y=up, Z=forward
+- **Transformation**: X→X, Y→Z, Z→Y (consistent with flexbodies/props)
+- **Geometry Preservation**: Maintains mesh proportions and orientation
+- **Y-Up Compliance**: Proper COLLADA Y-up axis for BeamNG compatibility
+
+#### 🔗 Seamless Integration
+- **JBeam Workflow**: Integrated with existing conversion process
+- **Name Synchronization**: Mesh object names match JBeam flexbody/prop references
+- **Duplicate Resolution**: Applies same mesh name resolution as JBeam output
+- **Transform Consistency**: Respects `--no-transform-properties` flag
+- **Batch Processing**: Converts all referenced .mesh files automatically
+
+#### 📤 Multi-Format Output
+- **.dae (COLLADA)**: Industry-standard 3D format, BeamNG.drive compatible
+- **.blend (Blender)**: Direct Blender import with materials and node setup
+- **Both Formats**: Generate both simultaneously for maximum compatibility
+- **Quality Assurance**: Validation and integrity checking for all outputs
+
+#### 🛡️ Enhanced Error Handling
+- **Malformed File Detection**: Comprehensive validation and error reporting
+- **Graceful Degradation**: Partial parsing with warnings for recoverable errors
+- **Fallback Meshes**: Automatic generation of placeholder geometry when parsing fails
+- **Detailed Logging**: Comprehensive diagnostic information and progress reporting
 
 ## Supported RoR Sections
 
@@ -448,6 +522,8 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - **⚡ Forset Support**: Enhanced forset parsing for proper flexbody node assignment
 - **🎛️ Clean Output Option**: `--no-transform-properties` flag for simplified JBeam output
 - **📐 Props Format Fix**: Corrected props format to match BeamNG documentation exactly
+- **🔄 Enhanced Mesh Conversion**: Robust Ogre3D parsing with proven blender2ogre techniques
+- **🎯 Advanced Mesh Support**: Binary/XML parsing, error recovery, and seamless JBeam integration
 - **🧪 Comprehensive Testing**: Extensive test coverage for all new features
 - **📚 Enhanced Documentation**: Complete documentation of all features and capabilities
 

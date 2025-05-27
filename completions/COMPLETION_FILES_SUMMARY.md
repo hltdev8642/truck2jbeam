@@ -47,8 +47,8 @@ Add-Content -Path $PROFILE -Value ". path\to\completions\truck2jbeam-completion.
 ## ✨ Features
 
 ### Intelligent Auto-Completion
-- **Command Options**: All 31 command-line flags and parameters
-- **File Types**: RoR files (*.truck, *.trailer, *.airplane, *.boat, *.car, *.load)
+- **Command Options**: All 34 command-line flags and parameters
+- **File Types**: RoR files (*.truck, *.trailer, *.airplane, *.boat, *.car, *.load, *.train)
 - **Templates**: car, truck, airplane, trailer
 - **Categories**: vehicles, terrains, aircraft, boats, trailers, loads, skins, tools
 - **Directories**: Smart directory completion for paths
@@ -87,7 +87,7 @@ truck2jbeam.py --output-dir <TAB>
 - `--dry-run` - Preview mode
 - `--author` - Custom author name
 
-### Enhanced Features (9)
+### Enhanced Features (12)
 - `--template` - Apply conversion template
 - `--config` - Custom configuration file
 - `--process-dae` - DAE file processing
@@ -97,6 +97,9 @@ truck2jbeam.py --output-dir <TAB>
 - `--include-stats` - Include conversion statistics
 - `--min-mass` - Override minimum node mass
 - `--no-transform-properties` - Exclude rotation, translation, and scale properties
+- `--convert-meshes` - Convert .mesh files to .dae/.blend format
+- `--mesh-output-format` - Output format for converted meshes
+- `--mesh-output-dir` - Output directory for converted mesh files
 
 ### Download Options (11)
 - `--search-ror` - Search RoR repository
@@ -108,7 +111,7 @@ truck2jbeam.py --output-dir <TAB>
 - `--no-extract` - Don't extract archives
 - `--search-limit` - Search result limit
 
-**Total: 31 command-line options with intelligent completion**
+**Total: 34 command-line options with intelligent completion**
 
 ## 🔧 Technical Implementation
 
@@ -162,7 +165,7 @@ truck2jbeam.py --<TAB>
 ### Before Completion
 ```bash
 truck2jbeam.py --<cursor>
-# User must remember all 31 options
+# User must remember all 34 options
 ```
 
 ### After Completion
@@ -191,7 +194,7 @@ truck2jbeam.py --<TAB>
 ## 📈 Benefits
 
 ### For Users
-- **Faster Command Entry**: No need to remember 31 options
+- **Faster Command Entry**: No need to remember 34 options
 - **Reduced Errors**: Prevents typos in option names
 - **Discovery**: Easy to find available features
 - **Efficiency**: Context-aware file and directory completion
