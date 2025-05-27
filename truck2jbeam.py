@@ -239,7 +239,9 @@ def convert_single_file(input_path: str, config: ConversionConfig, logger: loggi
 
         # Convert mesh files if requested
         if config.convert_meshes:
-            mesh_dir = config.mesh_output_dir or os.path.dirname(input_path)
+            # Look for .mesh files in the same directory as the truck file
+            mesh_dir = os.path.dirname(input_path)
+            # Output converted meshes to specified directory or default location
             output_dir = config.mesh_output_dir or os.path.join(os.path.dirname(output_path), "meshes")
 
             logger.info(f"Converting .mesh files to {config.mesh_output_format} format...")

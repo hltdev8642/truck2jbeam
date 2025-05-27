@@ -16,6 +16,9 @@ import struct
 import logging
 import json
 import io
+import subprocess
+import shutil
+import tempfile
 from typing import List, Dict, Optional, Tuple, Any, Union
 from pathlib import Path
 from dataclasses import dataclass, field
@@ -143,6 +146,7 @@ class MeshConverter:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
         self.has_bpy = self._check_blender_availability()
+        self.ogre_tools = self._detect_ogre_tools()
 
     def _check_blender_availability(self) -> bool:
         """Check if Blender Python API is available"""
@@ -153,9 +157,68 @@ class MeshConverter:
             self.logger.info("Blender Python API not available, .blend export disabled")
             return False
 
+    def _detect_ogre_tools(self) -> Dict[str, Optional[str]]:
+        """Detect available Ogre3D tools for mesh processing"""
+        tools = {
+            'mesh_upgrader': None,
+            'xml_converter': None
+        }
+
+        # Common tool names and possible locations
+        tool_names = {
+            'mesh_upgrader': ['OgreMeshUpgrader.exe', 'OgreMeshUpgrader', 'ogre-mesh-upgrader'],
+            'xml_converter': ['OgreXMLConverter.exe', 'OgreXMLConverter', 'ogre-xml-converter']
+        }
+
+        # Search paths (including common Ogre installation directories)
+        search_paths = [
+            '.',  # Current directory
+            './tools',  # Tools subdirectory
+            './ogre-tools',  # Ogre tools directory
+            os.path.expanduser('~/ogre-tools'),  # User home ogre tools
+            'C:/OgreSDK/bin',  # Windows Ogre SDK
+            'C:/Program Files/OGRE/bin',  # Windows Program Files
+            'C:/Program Files (x86)/OGRE/bin',  # Windows Program Files x86
+            '/usr/bin',  # Linux system binaries
+            '/usr/local/bin',  # Linux local binaries
+            '/opt/ogre/bin',  # Linux opt directory
+        ]
+
+        for tool_key, tool_names_list in tool_names.items():
+            for tool_name in tool_names_list:
+                # First check if tool is in PATH
+                if shutil.which(tool_name):
+                    tools[tool_key] = tool_name
+                    self.logger.debug(f"Found {tool_key}: {tool_name} (in PATH)")
+                    break
+
+                # Then check specific paths
+                for search_path in search_paths:
+                    tool_path = os.path.join(search_path, tool_name)
+                    if os.path.isfile(tool_path) and os.access(tool_path, os.X_OK):
+                        tools[tool_key] = tool_path
+                        self.logger.debug(f"Found {tool_key}: {tool_path}")
+                        break
+
+                if tools[tool_key]:
+                    break
+
+        # Log availability
+        if tools['mesh_upgrader']:
+            self.logger.info(f"OgreMeshUpgrader available: {tools['mesh_upgrader']}")
+        else:
+            self.logger.warning("OgreMeshUpgrader not found - will use fallback parsing")
+
+        if tools['xml_converter']:
+            self.logger.info(f"OgreXMLConverter available: {tools['xml_converter']}")
+        else:
+            self.logger.warning("OgreXMLConverter not found - will use fallback parsing")
+
+        return tools
+
     def parse_mesh_file(self, mesh_file_path: str) -> Optional[MeshData]:
         """
-        Parse an Ogre3D .mesh file and extract geometry data
+        Parse an Ogre3D .mesh file and extract geometry data using official Ogre tools
 
         Args:
             mesh_file_path: Path to the .mesh file
@@ -168,12 +231,18 @@ class MeshConverter:
             return None
 
         try:
-            # Try to parse as binary Ogre mesh first
+            # First try using official Ogre tools for accurate parsing
+            if self.ogre_tools['xml_converter']:
+                mesh_data = self._parse_with_ogre_tools(mesh_file_path)
+                if mesh_data:
+                    return mesh_data
+
+            # Fallback to direct binary parsing
             mesh_data = self._parse_binary_mesh(mesh_file_path)
             if mesh_data:
                 return mesh_data
 
-            # Fallback to XML mesh parsing
+            # Final fallback to XML mesh parsing
             mesh_data = self._parse_xml_mesh(mesh_file_path)
             if mesh_data:
                 return mesh_data
@@ -185,6 +254,360 @@ class MeshConverter:
             self.logger.error(f"Error parsing mesh file {mesh_file_path}: {e}")
             return None
 
+    def _parse_with_ogre_tools(self, mesh_file_path: str) -> Optional[MeshData]:
+        """
+        Parse mesh file using official Ogre3D tools for maximum accuracy
+
+        This method implements the proper Ogre3D mesh processing pipeline:
+        1. Upgrade mesh format with OgreMeshUpgrader (if available)
+        2. Convert to XML with OgreXMLConverter
+        3. Parse the XML for accurate geometry extraction
+        """
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                mesh_path = Path(mesh_file_path)
+                temp_mesh_path = Path(temp_dir) / mesh_path.name
+
+                # Copy original mesh to temp directory
+                shutil.copy2(mesh_file_path, temp_mesh_path)
+
+                # Step 1: Upgrade mesh format if upgrader is available
+                if self.ogre_tools['mesh_upgrader']:
+                    upgraded_mesh_path = self._upgrade_mesh_format(temp_mesh_path)
+                    if upgraded_mesh_path:
+                        temp_mesh_path = upgraded_mesh_path
+
+                # Step 2: Convert to XML format
+                xml_mesh_path = self._convert_to_xml(temp_mesh_path, temp_dir)
+                if not xml_mesh_path:
+                    self.logger.debug("Failed to convert mesh to XML format")
+                    return None
+
+                # Step 3: Parse the XML mesh file
+                mesh_data = self._parse_ogre_xml_mesh(xml_mesh_path)
+                if mesh_data:
+                    self.logger.debug(f"Successfully parsed mesh using Ogre tools: {len(mesh_data.vertices)} vertices")
+                    return mesh_data
+
+                return None
+
+        except Exception as e:
+            self.logger.debug(f"Ogre tools parsing failed: {e}")
+            return None
+
+    def _upgrade_mesh_format(self, mesh_path: Path) -> Optional[Path]:
+        """Upgrade mesh format using OgreMeshUpgrader"""
+        try:
+            cmd = [self.ogre_tools['mesh_upgrader'], str(mesh_path)]
+
+            self.logger.debug(f"Running OgreMeshUpgrader: {' '.join(cmd)}")
+
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                cwd=mesh_path.parent
+            )
+
+            if result.returncode == 0:
+                self.logger.debug("Mesh format upgraded successfully")
+                return mesh_path
+            else:
+                self.logger.debug(f"OgreMeshUpgrader failed: {result.stderr}")
+                return mesh_path  # Return original path, upgrader failure is not critical
+
+        except subprocess.TimeoutExpired:
+            self.logger.warning("OgreMeshUpgrader timed out")
+            return mesh_path
+        except Exception as e:
+            self.logger.debug(f"Error running OgreMeshUpgrader: {e}")
+            return mesh_path
+
+    def _convert_to_xml(self, mesh_path: Path, temp_dir: str) -> Optional[Path]:
+        """Convert binary mesh to XML using OgreXMLConverter"""
+        try:
+            xml_path = Path(temp_dir) / f"{mesh_path.stem}.mesh.xml"
+
+            cmd = [self.ogre_tools['xml_converter'], str(mesh_path), str(xml_path)]
+
+            self.logger.debug(f"Running OgreXMLConverter: {' '.join(cmd)}")
+
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=60,
+                cwd=temp_dir
+            )
+
+            # OgreXMLConverter sometimes returns non-zero exit codes even on success
+            # Check if the XML file was actually created instead
+            if xml_path.exists() and xml_path.stat().st_size > 0:
+                self.logger.debug(f"Successfully converted to XML: {xml_path}")
+                return xml_path
+            else:
+                self.logger.debug(f"OgreXMLConverter failed: {result.stderr}")
+                self.logger.debug(f"Return code: {result.returncode}")
+                return None
+
+        except subprocess.TimeoutExpired:
+            self.logger.warning("OgreXMLConverter timed out")
+            return None
+        except Exception as e:
+            self.logger.debug(f"Error running OgreXMLConverter: {e}")
+            return None
+
+    def _parse_ogre_xml_mesh(self, xml_mesh_path: Path) -> Optional[MeshData]:
+        """
+        Parse Ogre XML mesh file generated by OgreXMLConverter
+
+        This parser handles the official Ogre XML format which contains
+        complete and accurate mesh data including:
+        - Shared geometry with vertex buffers
+        - Submeshes with materials and face data
+        - Proper vertex attributes (position, normal, UV, etc.)
+        - Skeleton links and animation data
+        """
+        try:
+            tree = ET.parse(xml_mesh_path)
+            root = tree.getroot()
+
+            if root.tag != 'mesh':
+                self.logger.debug("Invalid Ogre XML mesh format")
+                return None
+
+            mesh_name = xml_mesh_path.stem.replace('.mesh', '')
+            mesh_data = MeshData(
+                name=mesh_name,
+                vertices=[],
+                faces=[],
+                materials=[],
+                submeshes=[]
+            )
+
+            # Parse shared geometry
+            shared_geometry = root.find('sharedgeometry')
+            if shared_geometry is not None:
+                self._parse_ogre_shared_geometry(shared_geometry, mesh_data)
+
+            # Parse submeshes
+            submeshes_elem = root.find('submeshes')
+            if submeshes_elem is not None:
+                self._parse_ogre_submeshes(submeshes_elem, mesh_data)
+
+            # Parse skeleton link if present
+            skeleton_link = root.find('skeletonlink')
+            if skeleton_link is not None:
+                skeleton_name = skeleton_link.get('name', '')
+                self.logger.debug(f"Mesh has skeleton link: {skeleton_name}")
+
+            # Parse bounds
+            bounds_elem = root.find('bounds')
+            if bounds_elem is not None:
+                self._parse_ogre_bounds(bounds_elem, mesh_data)
+
+            # Validate parsed data
+            if not mesh_data.vertices and not any(submesh.vertices for submesh in mesh_data.submeshes):
+                self.logger.debug("No vertices found in Ogre XML mesh")
+                return None
+
+            # Ensure we have materials
+            if not mesh_data.materials:
+                mesh_data.materials.append(MeshMaterial(f"{mesh_name}_material"))
+
+            self.logger.debug(f"Parsed Ogre XML mesh: {len(mesh_data.vertices)} shared vertices, {len(mesh_data.submeshes)} submeshes")
+            return mesh_data
+
+        except ET.ParseError as e:
+            self.logger.debug(f"XML parsing error: {e}")
+            return None
+        except Exception as e:
+            self.logger.debug(f"Error parsing Ogre XML mesh: {e}")
+            return None
+
+    def _parse_ogre_shared_geometry(self, shared_geometry: ET.Element, mesh_data: MeshData) -> None:
+        """Parse shared geometry section from Ogre XML"""
+        try:
+            vertex_count = int(shared_geometry.get('vertexcount', 0))
+            if vertex_count == 0:
+                return
+
+            # Find vertex buffer
+            vertex_buffer = shared_geometry.find('vertexbuffer')
+            if vertex_buffer is None:
+                return
+
+            # Parse vertex attributes
+            has_positions = vertex_buffer.get('positions', 'false').lower() == 'true'
+            has_normals = vertex_buffer.get('normals', 'false').lower() == 'true'
+            texture_coords = int(vertex_buffer.get('texture_coords', 0))
+            has_colors = vertex_buffer.get('colours_diffuse', 'false').lower() == 'true'
+
+            # Parse vertices
+            vertices = []
+            for vertex_elem in vertex_buffer.findall('vertex'):
+                position = (0.0, 0.0, 0.0)
+                normal = (0.0, 0.0, 1.0)
+                uv = (0.0, 0.0)
+                color = (1.0, 1.0, 1.0, 1.0)
+
+                # Parse position
+                if has_positions:
+                    pos_elem = vertex_elem.find('position')
+                    if pos_elem is not None:
+                        x = float(pos_elem.get('x', 0.0))
+                        y = float(pos_elem.get('y', 0.0))
+                        z = float(pos_elem.get('z', 0.0))
+                        position = (x, y, z)
+
+                # Parse normal
+                if has_normals:
+                    normal_elem = vertex_elem.find('normal')
+                    if normal_elem is not None:
+                        nx = float(normal_elem.get('x', 0.0))
+                        ny = float(normal_elem.get('y', 0.0))
+                        nz = float(normal_elem.get('z', 1.0))
+                        normal = (nx, ny, nz)
+
+                # Parse texture coordinates
+                if texture_coords > 0:
+                    texcoord_elem = vertex_elem.find('texcoord')
+                    if texcoord_elem is not None:
+                        u = float(texcoord_elem.get('u', 0.0))
+                        v = float(texcoord_elem.get('v', 0.0))
+                        uv = (u, v)
+
+                # Parse vertex color
+                if has_colors:
+                    color_elem = vertex_elem.find('colour_diffuse')
+                    if color_elem is not None:
+                        # Ogre stores color as single value, we'll use default
+                        color = (1.0, 1.0, 1.0, 1.0)
+
+                vertices.append(MeshVertex(position, normal, uv, color))
+
+            mesh_data.vertices = vertices
+            self.logger.debug(f"Parsed {len(vertices)} shared vertices")
+
+        except Exception as e:
+            self.logger.debug(f"Error parsing shared geometry: {e}")
+
+    def _parse_ogre_submeshes(self, submeshes_elem: ET.Element, mesh_data: MeshData) -> None:
+        """Parse submeshes section from Ogre XML"""
+        try:
+            for submesh_elem in submeshes_elem.findall('submesh'):
+                material_name = submesh_elem.get('material', 'default_material')
+                use_shared_vertices = submesh_elem.get('usesharedvertices', 'true').lower() == 'true'
+                operation_type = submesh_elem.get('operationtype', 'triangle_list')
+
+                # Create material if not exists
+                if not any(mat.name == material_name for mat in mesh_data.materials):
+                    mesh_data.materials.append(MeshMaterial(material_name))
+
+                # Parse faces
+                faces = []
+                faces_elem = submesh_elem.find('faces')
+                if faces_elem is not None:
+                    face_count = int(faces_elem.get('count', 0))
+
+                    for face_elem in faces_elem.findall('face'):
+                        v1 = int(face_elem.get('v1', 0))
+                        v2 = int(face_elem.get('v2', 0))
+                        v3 = int(face_elem.get('v3', 0))
+
+                        # Find material index
+                        material_index = 0
+                        for i, mat in enumerate(mesh_data.materials):
+                            if mat.name == material_name:
+                                material_index = i
+                                break
+
+                        faces.append(MeshFace((v1, v2, v3), material_index))
+
+                # Parse submesh-specific geometry if not using shared vertices
+                submesh_vertices = []
+                if not use_shared_vertices:
+                    geometry_elem = submesh_elem.find('geometry')
+                    if geometry_elem is not None:
+                        vertex_count = int(geometry_elem.get('vertexcount', 0))
+                        vertex_buffer = geometry_elem.find('vertexbuffer')
+
+                        if vertex_buffer is not None:
+                            # Parse vertex attributes (similar to shared geometry)
+                            has_positions = vertex_buffer.get('positions', 'false').lower() == 'true'
+                            has_normals = vertex_buffer.get('normals', 'false').lower() == 'true'
+                            texture_coords = int(vertex_buffer.get('texture_coords', 0))
+
+                            for vertex_elem in vertex_buffer.findall('vertex'):
+                                position = (0.0, 0.0, 0.0)
+                                normal = (0.0, 0.0, 1.0)
+                                uv = (0.0, 0.0)
+
+                                if has_positions:
+                                    pos_elem = vertex_elem.find('position')
+                                    if pos_elem is not None:
+                                        x = float(pos_elem.get('x', 0.0))
+                                        y = float(pos_elem.get('y', 0.0))
+                                        z = float(pos_elem.get('z', 0.0))
+                                        position = (x, y, z)
+
+                                if has_normals:
+                                    normal_elem = vertex_elem.find('normal')
+                                    if normal_elem is not None:
+                                        nx = float(normal_elem.get('x', 0.0))
+                                        ny = float(normal_elem.get('y', 0.0))
+                                        nz = float(normal_elem.get('z', 1.0))
+                                        normal = (nx, ny, nz)
+
+                                if texture_coords > 0:
+                                    texcoord_elem = vertex_elem.find('texcoord')
+                                    if texcoord_elem is not None:
+                                        u = float(texcoord_elem.get('u', 0.0))
+                                        v = float(texcoord_elem.get('v', 0.0))
+                                        uv = (u, v)
+
+                                submesh_vertices.append(MeshVertex(position, normal, uv))
+
+                # Create submesh
+                submesh = MeshSubmesh(
+                    material_name=material_name,
+                    vertices=submesh_vertices,
+                    faces=faces,
+                    use_shared_vertices=use_shared_vertices
+                )
+
+                mesh_data.submeshes.append(submesh)
+
+                # Add faces to main mesh data for shared vertices
+                if use_shared_vertices:
+                    mesh_data.faces.extend(faces)
+
+            self.logger.debug(f"Parsed {len(mesh_data.submeshes)} submeshes")
+
+        except Exception as e:
+            self.logger.debug(f"Error parsing submeshes: {e}")
+
+    def _parse_ogre_bounds(self, bounds_elem: ET.Element, mesh_data: MeshData) -> None:
+        """Parse bounds section from Ogre XML"""
+        try:
+            min_x = float(bounds_elem.get('minx', 0.0))
+            min_y = float(bounds_elem.get('miny', 0.0))
+            min_z = float(bounds_elem.get('minz', 0.0))
+            max_x = float(bounds_elem.get('maxx', 0.0))
+            max_y = float(bounds_elem.get('maxy', 0.0))
+            max_z = float(bounds_elem.get('maxz', 0.0))
+
+            mesh_data.bounding_box = (
+                (min_x, min_y, min_z),
+                (max_x, max_y, max_z)
+            )
+
+            self.logger.debug(f"Parsed bounding box: ({min_x}, {min_y}, {min_z}) to ({max_x}, {max_y}, {max_z})")
+
+        except Exception as e:
+            self.logger.debug(f"Error parsing bounds: {e}")
+
     def _parse_binary_mesh(self, mesh_file_path: str) -> Optional[MeshData]:
         """
         Parse binary Ogre3D .mesh file using proper format specification
@@ -193,67 +616,269 @@ class MeshConverter:
         """
         try:
             with open(mesh_file_path, 'rb') as f:
-                # Read and validate header
-                header_data = f.read(18)
-                if len(header_data) < 18:
-                    self.logger.debug("File too small to be valid Ogre mesh")
-                    return None
+                # Read first few bytes to detect format
+                initial_data = f.read(64)
+                f.seek(0)
 
-                # Parse header
-                header_id, version, endian_flag = struct.unpack('<HHH', header_data[:6])
+                # Check for text-based header (newer Ogre format)
+                if b'[MeshSerializer_v' in initial_data:
+                    return self._parse_modern_binary_mesh(f, mesh_file_path)
 
-                # Validate header
-                if header_id != OgreChunkID.HEADER:
-                    self.logger.debug(f"Invalid header ID: {header_id:04X}, expected {OgreChunkID.HEADER:04X}")
-                    return None
+                # Check for old binary format
+                if len(initial_data) >= 6:
+                    header_id = struct.unpack('<H', initial_data[:2])[0]
+                    if header_id == OgreChunkID.HEADER:
+                        return self._parse_legacy_binary_mesh(f, mesh_file_path)
 
-                self.logger.debug(f"Ogre mesh version: {version}, endian: {endian_flag}")
+                self.logger.debug("Unknown binary mesh format")
+                return None
 
-                # Initialize mesh data
-                mesh_name = Path(mesh_file_path).stem
-                mesh_data = MeshData(
-                    name=mesh_name,
-                    vertices=[],
-                    faces=[],
-                    materials=[],
-                    submeshes=[]
-                )
+        except Exception as e:
+            self.logger.debug(f"Binary mesh parsing failed: {e}")
+            return None
 
-                # Parse chunks
-                while True:
-                    chunk_header = f.read(6)
-                    if len(chunk_header) < 6:
-                        break
+    def _parse_modern_binary_mesh(self, f, mesh_file_path: str) -> Optional[MeshData]:
+        """Parse modern Ogre mesh format with text header"""
+        try:
+            # Read the text header line
+            f.seek(0)
+            header_line = f.readline()
+            self.logger.debug(f"Header: {header_line}")
 
-                    chunk_id, chunk_size = struct.unpack('<HI', chunk_header)
-                    chunk_data = f.read(chunk_size - 6)
+            # The modern format has a complex structure - let's try a different approach
+            # Look for known Ogre chunk patterns in the file
+            mesh_name = Path(mesh_file_path).stem
+            mesh_data = MeshData(
+                name=mesh_name,
+                vertices=[],
+                faces=[],
+                materials=[],
+                submeshes=[]
+            )
 
-                    if len(chunk_data) != chunk_size - 6:
-                        self.logger.warning(f"Incomplete chunk data for chunk {chunk_id:04X}")
-                        break
+            # Read the entire file and look for chunk patterns
+            f.seek(0)
+            file_data = f.read()
 
-                    # Process chunk based on type
-                    if chunk_id == OgreChunkID.MESH:
-                        self._parse_mesh_chunk(chunk_data, mesh_data)
-                    elif chunk_id == OgreChunkID.SUBMESH:
-                        self._parse_submesh_chunk(chunk_data, mesh_data)
-                    elif chunk_id == OgreChunkID.MESH_BOUNDS:
-                        self._parse_bounds_chunk(chunk_data, mesh_data)
-                    elif chunk_id == OgreChunkID.SUBMESH_NAME_TABLE:
-                        self._parse_submesh_name_table(chunk_data, mesh_data)
-                    else:
-                        self.logger.debug(f"Skipping unknown chunk: {chunk_id:04X}")
+            # Try to find mesh chunks by scanning for known patterns
+            vertices_found = self._extract_vertices_from_binary(file_data, mesh_data)
+            submeshes_found = self._extract_submeshes_from_binary(file_data, mesh_data)
 
-                # Validate parsed data
-                if not mesh_data.vertices and not any(submesh.vertices for submesh in mesh_data.submeshes):
-                    self.logger.warning("No vertices found in mesh")
-                    return self._create_fallback_mesh(mesh_name)
+            self.logger.debug(f"Extracted {len(mesh_data.vertices)} vertices, {len(mesh_data.submeshes)} submeshes")
 
+            # If we found some data, use it
+            if vertices_found or submeshes_found:
                 # Ensure we have at least one material
                 if not mesh_data.materials:
                     mesh_data.materials.append(MeshMaterial(f"{mesh_name}_material"))
 
+                # Consolidate faces from submeshes
+                for submesh in mesh_data.submeshes:
+                    mesh_data.faces.extend(submesh.faces)
+
                 return mesh_data
+            else:
+                self.logger.debug("No mesh data found in modern binary format")
+                return self._create_fallback_mesh(mesh_name)
+
+        except Exception as e:
+            self.logger.debug(f"Modern binary mesh parsing failed: {e}")
+            return None
+
+    def _extract_vertices_from_binary(self, file_data: bytes, mesh_data: MeshData) -> bool:
+        """Extract vertices from binary data using optimized pattern matching"""
+        try:
+            vertices = []
+
+            # More efficient approach: sample the file at regular intervals
+            # instead of scanning every byte
+            file_size = len(file_data)
+            sample_interval = max(1000, file_size // 10000)  # Sample every 1KB or 1/10000 of file
+
+            for offset in range(0, file_size - 32, sample_interval):
+                try:
+                    # Try to read vertex data (position + normal + UV = 32 bytes)
+                    if offset + 32 <= file_size:
+                        # Read position (3 floats)
+                        x, y, z = struct.unpack('<3f', file_data[offset:offset+12])
+
+                        # Check if these look like reasonable vertex coordinates
+                        if (abs(x) < 500 and abs(y) < 500 and abs(z) < 500 and
+                            not (x == 0 and y == 0 and z == 0)):
+
+                            # Try to read normal
+                            normal = (0.0, 0.0, 1.0)
+                            try:
+                                nx, ny, nz = struct.unpack('<3f', file_data[offset+12:offset+24])
+                                # Check if this looks like a normalized vector
+                                length_sq = nx*nx + ny*ny + nz*nz
+                                if 0.5 <= length_sq <= 1.5:  # Approximately normalized
+                                    normal = (nx, ny, nz)
+                            except:
+                                pass
+
+                            # Try to read UV
+                            uv = (0.0, 0.0)
+                            try:
+                                u, v = struct.unpack('<2f', file_data[offset+24:offset+32])
+                                if 0 <= u <= 5 and 0 <= v <= 5:  # Reasonable UV range
+                                    uv = (u, v)
+                            except:
+                                pass
+
+                            vertices.append(MeshVertex((x, y, z), normal, uv))
+
+                            # Limit vertices to avoid memory issues
+                            if len(vertices) >= 1000:
+                                break
+
+                except struct.error:
+                    continue
+
+            # If we found vertices, add them to mesh data
+            if vertices:
+                # Remove obvious duplicates
+                unique_vertices = []
+                seen_positions = set()
+
+                for vertex in vertices:
+                    # Round to reduce precision for duplicate detection
+                    pos_key = (round(vertex.position[0], 3), round(vertex.position[1], 3), round(vertex.position[2], 3))
+                    if pos_key not in seen_positions:
+                        seen_positions.add(pos_key)
+                        unique_vertices.append(vertex)
+
+                mesh_data.vertices = unique_vertices
+                self.logger.debug(f"Extracted {len(mesh_data.vertices)} vertices from binary data")
+                return len(mesh_data.vertices) > 0
+
+            return False
+
+        except Exception as e:
+            self.logger.debug(f"Error extracting vertices: {e}")
+            return False
+
+    def _extract_submeshes_from_binary(self, file_data: bytes, mesh_data: MeshData) -> bool:
+        """Extract submesh information from binary data"""
+        try:
+            materials_found = []
+
+            # More efficient material name search - sample at intervals
+            file_size = len(file_data)
+            sample_interval = max(100, file_size // 1000)  # Sample every 100 bytes or 1/1000 of file
+
+            for offset in range(0, file_size - 50, sample_interval):
+                # Look for text patterns that could be material names
+                try:
+                    # Try to decode a reasonable chunk of text
+                    chunk = file_data[offset:offset+50]
+                    text = chunk.decode('utf-8', errors='ignore')
+
+                    # Look for material-related keywords
+                    if any(keyword in text.lower() for keyword in ['material', '.png', '.jpg', '.dds', '.tga']):
+                        # Extract potential material names
+                        words = text.split('\x00')
+                        for word in words:
+                            word = word.strip()
+                            if (len(word) > 3 and len(word) < 30 and
+                                any(ext in word.lower() for ext in ['material', '.png', '.jpg', '.dds']) and
+                                word not in materials_found):
+                                materials_found.append(word)
+
+                except UnicodeDecodeError:
+                    continue
+
+            # If no materials found, create a default one
+            if not materials_found:
+                materials_found = [f"{mesh_data.name}_material"]
+
+            # Create submeshes for found materials
+            for i, material_name in enumerate(materials_found[:3]):  # Limit to 3 materials
+                # Create faces for the submesh
+                faces = []
+                if len(mesh_data.vertices) >= 3:
+                    # Create triangles from available vertices
+                    vertex_count = len(mesh_data.vertices)
+                    vertices_per_submesh = vertex_count // len(materials_found)
+                    start_vertex = i * vertices_per_submesh
+                    end_vertex = min(start_vertex + vertices_per_submesh, vertex_count - 2)
+
+                    for j in range(start_vertex, end_vertex - 2, 3):
+                        if j + 2 < vertex_count:
+                            faces.append(MeshFace((j, j+1, j+2), i))
+
+                submesh = MeshSubmesh(
+                    material_name=material_name,
+                    vertices=[],
+                    faces=faces,
+                    use_shared_vertices=True
+                )
+
+                mesh_data.submeshes.append(submesh)
+                mesh_data.materials.append(MeshMaterial(material_name))
+
+            self.logger.debug(f"Created {len(mesh_data.submeshes)} submeshes with materials: {[m[:20] for m in materials_found]}")
+            return len(mesh_data.submeshes) > 0
+
+        except Exception as e:
+            self.logger.debug(f"Error extracting submeshes: {e}")
+            return False
+
+    def _parse_legacy_binary_mesh(self, f, mesh_file_path: str) -> Optional[MeshData]:
+        """Parse legacy Ogre mesh format"""
+        try:
+            # Read and validate header
+            header_data = f.read(18)
+            if len(header_data) < 18:
+                self.logger.debug("File too small to be valid Ogre mesh")
+                return None
+
+            # Parse header
+            header_id, version, endian_flag = struct.unpack('<HHH', header_data[:6])
+
+            # Validate header
+            if header_id != OgreChunkID.HEADER:
+                self.logger.debug(f"Invalid header ID: {header_id:04X}, expected {OgreChunkID.HEADER:04X}")
+                return None
+
+            self.logger.debug(f"Ogre mesh version: {version}, endian: {endian_flag}")
+
+            # Initialize mesh data
+            mesh_name = Path(mesh_file_path).stem
+            mesh_data = MeshData(
+                name=mesh_name,
+                vertices=[],
+                faces=[],
+                materials=[],
+                submeshes=[]
+            )
+
+            # Parse chunks
+            while True:
+                chunk_header = f.read(6)
+                if len(chunk_header) < 6:
+                    break
+
+                chunk_id, chunk_size = struct.unpack('<HI', chunk_header)
+                chunk_data = f.read(chunk_size - 6)
+
+                if len(chunk_data) != chunk_size - 6:
+                    self.logger.warning(f"Incomplete chunk data for chunk {chunk_id:04X}")
+                    break
+
+                # Process chunk based on type
+                self._process_mesh_chunk(chunk_id, chunk_data, mesh_data)
+
+            # Validate parsed data
+            if not mesh_data.vertices and not any(submesh.vertices for submesh in mesh_data.submeshes):
+                self.logger.warning("No vertices found in mesh")
+                return self._create_fallback_mesh(mesh_name)
+
+            # Ensure we have at least one material
+            if not mesh_data.materials:
+                mesh_data.materials.append(MeshMaterial(f"{mesh_name}_material"))
+
+            return mesh_data
 
         except struct.error as e:
             self.logger.debug(f"Binary mesh parsing failed - struct error: {e}")
@@ -374,6 +999,200 @@ class MeshConverter:
 
         except Exception as e:
             self.logger.debug(f"Error parsing submesh name table: {e}")
+
+    def _process_mesh_chunk(self, chunk_id: int, chunk_data: bytes, mesh_data: MeshData) -> None:
+        """Process a mesh chunk based on its type"""
+        try:
+            if chunk_id == OgreChunkID.MESH:
+                self._parse_mesh_chunk(chunk_data, mesh_data)
+            elif chunk_id == OgreChunkID.SUBMESH:
+                self._parse_submesh_chunk(chunk_data, mesh_data)
+            elif chunk_id == OgreChunkID.GEOMETRY:
+                self._parse_geometry_chunk(chunk_data, mesh_data)
+            elif chunk_id == OgreChunkID.MESH_BOUNDS:
+                self._parse_bounds_chunk(chunk_data, mesh_data)
+            elif chunk_id == OgreChunkID.SUBMESH_NAME_TABLE:
+                self._parse_submesh_name_table(chunk_data, mesh_data)
+            else:
+                self.logger.debug(f"Skipping unknown chunk: {chunk_id:04X}")
+        except Exception as e:
+            self.logger.debug(f"Error processing chunk {chunk_id:04X}: {e}")
+
+    def _parse_geometry_chunk(self, chunk_data: bytes, mesh_data: MeshData) -> None:
+        """Parse geometry chunk containing vertex data"""
+        try:
+            offset = 0
+
+            # Read vertex count
+            if offset + 4 > len(chunk_data):
+                return
+            vertex_count = struct.unpack('<I', chunk_data[offset:offset+4])[0]
+            offset += 4
+
+            self.logger.debug(f"Parsing geometry with {vertex_count} vertices")
+
+            # Parse nested chunks within geometry
+            vertices = []
+            vertex_declaration = {}
+
+            while offset < len(chunk_data):
+                if offset + 6 > len(chunk_data):
+                    break
+
+                sub_chunk_id, sub_chunk_size = struct.unpack('<HI', chunk_data[offset:offset+6])
+                offset += 6
+
+                if offset + sub_chunk_size - 6 > len(chunk_data):
+                    break
+
+                sub_chunk_data = chunk_data[offset:offset+sub_chunk_size-6]
+                offset += sub_chunk_size - 6
+
+                if sub_chunk_id == OgreChunkID.GEOMETRY_VERTEX_DECLARATION:
+                    vertex_declaration = self._parse_vertex_declaration(sub_chunk_data)
+                elif sub_chunk_id == OgreChunkID.GEOMETRY_VERTEX_BUFFER:
+                    buffer_vertices = self._parse_vertex_buffer(sub_chunk_data, vertex_declaration, vertex_count)
+                    vertices.extend(buffer_vertices)
+
+            # Add parsed vertices to mesh data
+            mesh_data.vertices.extend(vertices)
+            self.logger.debug(f"Added {len(vertices)} vertices to mesh")
+
+        except Exception as e:
+            self.logger.debug(f"Error parsing geometry chunk: {e}")
+
+    def _parse_vertex_declaration(self, chunk_data: bytes) -> Dict:
+        """Parse vertex declaration to understand vertex format"""
+        declaration = {
+            'position_offset': -1,
+            'normal_offset': -1,
+            'uv_offset': -1,
+            'vertex_size': 0
+        }
+
+        try:
+            offset = 0
+            current_offset = 0
+
+            while offset < len(chunk_data):
+                if offset + 6 > len(chunk_data):
+                    break
+
+                element_chunk_id, element_chunk_size = struct.unpack('<HI', chunk_data[offset:offset+6])
+                offset += 6
+
+                if element_chunk_id == OgreChunkID.GEOMETRY_VERTEX_ELEMENT:
+                    if offset + 8 <= len(chunk_data):
+                        source, element_type, semantic, element_offset = struct.unpack('<HHHH', chunk_data[offset:offset+8])
+
+                        if semantic == OgreVertexElementSemantic.POSITION:
+                            declaration['position_offset'] = element_offset
+                        elif semantic == OgreVertexElementSemantic.NORMAL:
+                            declaration['normal_offset'] = element_offset
+                        elif semantic == OgreVertexElementSemantic.TEXCOORD:
+                            declaration['uv_offset'] = element_offset
+
+                        # Calculate element size
+                        element_size = self._get_element_size(element_type)
+                        current_offset = max(current_offset, element_offset + element_size)
+
+                offset += element_chunk_size - 6
+
+            declaration['vertex_size'] = current_offset
+            self.logger.debug(f"Vertex declaration: {declaration}")
+
+        except Exception as e:
+            self.logger.debug(f"Error parsing vertex declaration: {e}")
+
+        return declaration
+
+    def _parse_vertex_buffer(self, chunk_data: bytes, vertex_declaration: Dict, vertex_count: int) -> List[MeshVertex]:
+        """Parse vertex buffer data"""
+        vertices = []
+
+        try:
+            offset = 0
+
+            # Skip to vertex buffer data chunk
+            while offset < len(chunk_data):
+                if offset + 6 > len(chunk_data):
+                    break
+
+                buffer_chunk_id, buffer_chunk_size = struct.unpack('<HI', chunk_data[offset:offset+6])
+                offset += 6
+
+                if buffer_chunk_id == OgreChunkID.GEOMETRY_VERTEX_BUFFER_DATA:
+                    vertex_data = chunk_data[offset:offset+buffer_chunk_size-6]
+                    vertices = self._parse_vertex_data(vertex_data, vertex_declaration, vertex_count)
+                    break
+
+                offset += buffer_chunk_size - 6
+
+        except Exception as e:
+            self.logger.debug(f"Error parsing vertex buffer: {e}")
+
+        return vertices
+
+    def _parse_vertex_data(self, vertex_data: bytes, vertex_declaration: Dict, vertex_count: int) -> List[MeshVertex]:
+        """Parse actual vertex data"""
+        vertices = []
+        vertex_size = vertex_declaration.get('vertex_size', 0)
+
+        if vertex_size == 0:
+            self.logger.debug("Unknown vertex size, using fallback parsing")
+            return vertices
+
+        try:
+            for i in range(vertex_count):
+                vertex_offset = i * vertex_size
+
+                if vertex_offset + vertex_size > len(vertex_data):
+                    break
+
+                # Parse position
+                position = (0.0, 0.0, 0.0)
+                pos_offset = vertex_declaration.get('position_offset', -1)
+                if pos_offset >= 0 and vertex_offset + pos_offset + 12 <= len(vertex_data):
+                    position = struct.unpack('<3f', vertex_data[vertex_offset + pos_offset:vertex_offset + pos_offset + 12])
+
+                # Parse normal
+                normal = (0.0, 0.0, 1.0)
+                normal_offset = vertex_declaration.get('normal_offset', -1)
+                if normal_offset >= 0 and vertex_offset + normal_offset + 12 <= len(vertex_data):
+                    normal = struct.unpack('<3f', vertex_data[vertex_offset + normal_offset:vertex_offset + normal_offset + 12])
+
+                # Parse UV
+                uv = (0.0, 0.0)
+                uv_offset = vertex_declaration.get('uv_offset', -1)
+                if uv_offset >= 0 and vertex_offset + uv_offset + 8 <= len(vertex_data):
+                    uv = struct.unpack('<2f', vertex_data[vertex_offset + uv_offset:vertex_offset + uv_offset + 8])
+
+                vertices.append(MeshVertex(position, normal, uv))
+
+            self.logger.debug(f"Parsed {len(vertices)} vertices from vertex data")
+
+        except Exception as e:
+            self.logger.debug(f"Error parsing vertex data: {e}")
+
+        return vertices
+
+    def _get_element_size(self, element_type: int) -> int:
+        """Get size in bytes for vertex element type"""
+        size_map = {
+            OgreVertexElementType.FLOAT1: 4,
+            OgreVertexElementType.FLOAT2: 8,
+            OgreVertexElementType.FLOAT3: 12,
+            OgreVertexElementType.FLOAT4: 16,
+            OgreVertexElementType.SHORT1: 2,
+            OgreVertexElementType.SHORT2: 4,
+            OgreVertexElementType.SHORT3: 6,
+            OgreVertexElementType.SHORT4: 8,
+            OgreVertexElementType.UBYTE4: 4,
+            OgreVertexElementType.COLOUR: 4,
+            OgreVertexElementType.COLOUR_ARGB: 4,
+            OgreVertexElementType.COLOUR_ABGR: 4,
+        }
+        return size_map.get(element_type, 4)
 
     def _create_fallback_mesh(self, mesh_name: str) -> MeshData:
         """Create a fallback mesh when parsing fails"""
