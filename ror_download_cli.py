@@ -306,7 +306,14 @@ def main():
     history_parser = subparsers.add_parser('history', help='Show download history')
     history_parser.add_argument('--limit', type=int, default=50,
                                help='Number of entries to show (default: 50)')
-    
+
+    # Sitemap management commands
+    sitemap_parser = subparsers.add_parser('sitemap', help='Sitemap information')
+    sitemap_subparsers = sitemap_parser.add_subparsers(dest='sitemap_command', help='Sitemap commands')
+
+    # Sitemap stats
+    stats_parser = sitemap_subparsers.add_parser('stats', help='Show sitemap statistics')
+
     args = parser.parse_args()
     
     if not args.command:
@@ -327,12 +334,51 @@ def main():
             info_command(args)
         elif args.command == 'history':
             history_command(args)
+        elif args.command == 'sitemap':
+            sitemap_command(args)
     except KeyboardInterrupt:
         print("\nOperation cancelled by user")
         sys.exit(1)
     except Exception as e:
         print(f"Error: {e}")
         sys.exit(1)
+
+
+def sitemap_command(args):
+    """Handle sitemap commands"""
+    downloader = RoRDownloader(download_dir=args.download_dir)
+
+    if args.sitemap_command == 'stats':
+        show_sitemap_stats(downloader)
+    else:
+        print("Available sitemap commands:")
+        print("  stats - Show sitemap statistics")
+
+
+def show_sitemap_stats(downloader):
+    """Show sitemap statistics"""
+    print("🗺️  Sitemap Statistics")
+    print("=" * 40)
+
+    stats = downloader.get_sitemap_stats()
+
+    if stats['sitemap_accessible']:
+        print(f"✅ Sitemap accessible")
+        print(f"Total resources: {stats['total_resources']:,}")
+
+        if stats['sample_ids']:
+            print(f"\nSample resource IDs:")
+            for resource_id in stats['sample_ids']:
+                print(f"  {resource_id}")
+    else:
+        print(f"❌ Sitemap not accessible")
+        print(f"Error: {stats.get('error', 'Unknown error')}")
+
+    print(f"\n💡 How it works:")
+    print(f"   • Search queries are matched against sitemap URLs")
+    print(f"   • Only matching resources are fetched for details")
+    print(f"   • No large indexes are built or cached")
+    print(f"   • Fast and efficient search across all resources")
 
 
 if __name__ == "__main__":
