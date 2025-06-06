@@ -1,0 +1,9 @@
+{
+  "download_dir": "C:/Users/jared/Desktop/truck2jbeam/downloads",
+  "output_dir": "./output",
+  "convert_meshes": true,
+  "mesh_output_format": "dae",
+  "auto_extract": true,
+  "max_concurrent_downloads": 10,
+  "window_geometry": "1200x800"
+}
